@@ -1,0 +1,13 @@
+{
+  "name": "@tabsnap/crypto",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@tabsnap/core": "workspace:*",
+    "@tabsnap/schema": "workspace:*",
+    "hash-wasm": "4.12.0",
+    "zod": "4.5.4"
+  }
+}
