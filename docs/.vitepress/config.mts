@@ -7,6 +7,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/' },
+      { text: 'Chrome', link: '/guide/chrome-extension' },
       { text: 'Format', link: '/technical/tabsnap-format' },
       { text: 'Security', link: '/security/' },
       { text: 'Architecture', link: '/architecture/' },
@@ -17,6 +18,7 @@ export default defineConfig({
         text: 'Guide',
         items: [
           { text: 'Overview', link: '/guide/' },
+          { text: 'Chrome extension', link: '/guide/chrome-extension' },
           { text: 'Development', link: '/guide/development' },
         ],
       },
