@@ -91,7 +91,10 @@ function browserVersion(): string | undefined {
   return /(?:Chrome|Chromium)\/([0-9.]+)/u.exec(navigator.userAgent)?.[1];
 }
 
-async function captureWindow(window: chrome.windows.Window, order: number): Promise<WindowSnapshot> {
+async function captureWindow(
+  window: chrome.windows.Window,
+  order: number,
+): Promise<WindowSnapshot> {
   if (window.id === undefined) throw new Error('Chrome returned a window without an ID.');
 
   const tabs = [...(window.tabs ?? [])].sort((left, right) => left.index - right.index);
