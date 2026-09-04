@@ -49,8 +49,14 @@ for (const key of [
 
 const csp = manifest.content_security_policy?.extension_pages;
 assert(typeof csp === 'string', 'extension_pages CSP is required.');
-assert(csp.includes("script-src 'self' 'wasm-unsafe-eval'"), 'CSP must allow only local scripts plus packaged WASM.');
-assert(!/https?:|\bconnect-src\b|(?<!wasm-)unsafe-eval/u.test(csp), 'CSP must not enable remote network/script sources.');
+assert(
+  csp.includes("script-src 'self' 'wasm-unsafe-eval'"),
+  'CSP must allow only local scripts plus packaged WASM.',
+);
+assert(
+  !/https?:|\bconnect-src\b|(?<!wasm-)unsafe-eval/u.test(csp),
+  'CSP must not enable remote network/script sources.',
+);
 
 const textExtensions = new Set(['.css', '.html', '.js', '.json']);
 const networkPatterns = [
