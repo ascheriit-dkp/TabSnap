@@ -1,0 +1,7 @@
+node_modules/
+**/dist/
+**/.vitepress/cache/
+**/.vitepress/dist/
+pnpm-lock.yaml
+.github/ISSUE_TEMPLATE/
+.github/PULL_REQUEST_TEMPLATE.md

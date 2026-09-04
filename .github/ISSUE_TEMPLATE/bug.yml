@@ -1,0 +1,33 @@
+name: Bug report
+description: Something is broken.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Keep it reproducible. Don't include sensitive URLs unless needed."
+  - type: textarea
+    id: problem
+    attributes:
+      label: What broke?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Exact steps.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: TabSnap version
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+  - type: input
+    id: os
+    attributes:
+      label: OS

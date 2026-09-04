@@ -1,0 +1,33 @@
+{
+  "name": "tabsnap",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Move a browser workspace between machines without a backend.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm docs:build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm docs:build",
+    "docs:build": "vitepress build docs",
+    "docs:dev": "vitepress docs",
+    "docs:preview": "vitepress preview docs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.base.json --noEmit"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.9.1",
+    "prettier": "3.9.6",
+    "typescript": "6.0.2",
+    "typescript-eslint": "8.69.0",
+    "vitepress": "1.6.4",
+    "vitest": "4.1.10"
+  }
+}
