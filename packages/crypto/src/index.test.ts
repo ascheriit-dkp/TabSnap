@@ -1,7 +1,5 @@
-import type Argon2 from '@phi-ag/argon2';
-import initializeArgon2 from '@phi-ag/argon2/node';
 import type { TabSnapSnapshot } from '@tabsnap/schema';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   decryptSnapshot,
@@ -12,12 +10,6 @@ import {
   STRING_PREFIX,
   toBase64Url,
 } from './index.js';
-
-let argon2: Argon2;
-
-beforeAll(async () => {
-  argon2 = await initializeArgon2();
-});
 
 function snapshot(): TabSnapSnapshot {
   return {
@@ -58,37 +50,40 @@ describe('Base64URL', () => {
 
 describe('encrypted snapshots', () => {
   it('round-trips a binary envelope', async () => {
-    const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple', argon2);
-    expect(await decryptSnapshot(encrypted, 'correct horse battery staple', argon2)).toEqual(
-      snapshot(),
-    );
+    const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple');
+    expect(await decryptSnapshot(encrypted, 'correct horse battery staple')).toEqual(snapshot());
   });
 
   it('round-trips a copyable string', async () => {
-    const value = await exportSnapshotString(snapshot(), 'correct horse battery staple', argon2);
+    const value = await exportSnapshotString(snapshot(), 'correct horse battery staple');
     expect(value.startsWith(STRING_PREFIX)).toBe(true);
-    expect(await importSnapshotString(value, 'correct horse battery staple', argon2)).toEqual(
-      snapshot(),
-    );
+    expect(await importSnapshotString(value, 'correct horse battery staple')).toEqual(snapshot());
+  });
+
+  it('round-trips a Unicode password as UTF-8 bytes', async () => {
+    const password = 'clé très sûre 🔐 你好';
+    const encrypted = await encryptSnapshot(snapshot(), password);
+    expect(await decryptSnapshot(encrypted, password)).toEqual(snapshot());
   });
 
   it('rejects a wrong password without decrypting', async () => {
-    const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple', argon2);
-    await expect(
-      decryptSnapshot(encrypted, 'definitely the wrong password', argon2),
-    ).rejects.toThrow('Unable to decrypt snapshot.');
+    const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple');
+    await expect(decryptSnapshot(encrypted, 'definitely the wrong password')).rejects.toThrow(
+      'Unable to decrypt snapshot.',
+    );
   });
 
   it('rejects ciphertext tampering', async () => {
-    const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple', argon2);
-    encrypted[encrypted.length - 1] ^= 1;
-    await expect(decryptSnapshot(encrypted, 'correct horse battery staple', argon2)).rejects.toThrow(
+    const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple');
+    const lastIndex = encrypted.length - 1;
+    encrypted[lastIndex] = encrypted[lastIndex]! ^ 1;
+    await expect(decryptSnapshot(encrypted, 'correct horse battery staple')).rejects.toThrow(
       'Unable to decrypt snapshot.',
     );
   });
 
   it('rejects weak passwords', async () => {
-    await expect(encryptSnapshot(snapshot(), 'short', argon2)).rejects.toThrow(
+    await expect(encryptSnapshot(snapshot(), 'short')).rejects.toThrow(
       'Password must be at least 8 characters.',
     );
   });
