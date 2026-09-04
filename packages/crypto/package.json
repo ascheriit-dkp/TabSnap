@@ -1,0 +1,13 @@
+{
+  "name": "@tabsnap/crypto",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@phi-ag/argon2": "0.5.27",
+    "@tabsnap/core": "workspace:*",
+    "@tabsnap/schema": "workspace:*",
+    "zod": "4.5.4"
+  }
+}
