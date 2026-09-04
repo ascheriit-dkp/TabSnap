@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TabSnap</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">LOCAL-ONLY WORKSPACE TRANSFER</p>
+          <h1>TabSnap</h1>
+        </div>
+        <span class="local-badge">No backend</span>
+      </header>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Workspace</h2>
+            <p>Capture Chrome windows, tabs, pinning, groups and geometry.</p>
+          </div>
+          <button id="capture" type="button">Capture now</button>
+        </div>
+        <div id="preview" class="preview empty">Nothing loaded yet.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Encrypt & export</h2>
+        <label>
+          Password
+          <input id="password" type="password" minlength="8" autocomplete="off" />
+        </label>
+        <div class="button-row">
+          <button id="export-string" type="button" disabled>Encrypt string</button>
+          <button id="export-file" type="button" class="secondary" disabled>Download .tabsnap</button>
+        </div>
+        <label>
+          Copyable encrypted string
+          <textarea id="output-string" rows="4" readonly placeholder="Encrypted output appears here."></textarea>
+        </label>
+        <button id="copy-string" type="button" class="secondary" disabled>Copy string</button>
+      </section>
+
+      <section class="panel">
+        <h2>Import & restore</h2>
+        <label>
+          Encrypted string
+          <textarea id="input-string" rows="4" placeholder="tabsnap:v1:..."></textarea>
+        </label>
+        <div class="button-row">
+          <button id="import-string" type="button">Decrypt string</button>
+          <label class="file-button secondary">
+            Choose .tabsnap
+            <input id="input-file" type="file" accept=".tabsnap,application/octet-stream" />
+          </label>
+        </div>
+        <button id="restore" type="button" disabled>Restore as new windows</button>
+      </section>
+
+      <pre id="status" class="status" aria-live="polite">Ready.</pre>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
