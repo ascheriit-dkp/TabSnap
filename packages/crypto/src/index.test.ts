@@ -1,5 +1,5 @@
-import initializeArgon2 from '@phi-ag/argon2/node';
 import type Argon2 from '@phi-ag/argon2';
+import initializeArgon2 from '@phi-ag/argon2/node';
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -74,9 +74,9 @@ describe('encrypted snapshots', () => {
 
   it('rejects a wrong password without decrypting', async () => {
     const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple', argon2);
-    await expect(decryptSnapshot(encrypted, 'definitely the wrong password', argon2)).rejects.toThrow(
-      'Unable to decrypt snapshot.',
-    );
+    await expect(
+      decryptSnapshot(encrypted, 'definitely the wrong password', argon2),
+    ).rejects.toThrow('Unable to decrypt snapshot.');
   });
 
   it('rejects ciphertext tampering', async () => {
