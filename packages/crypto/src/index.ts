@@ -1,5 +1,9 @@
 import Argon2, { Argon2Type, Argon2Version } from '@phi-ag/argon2';
-import { decodeSnapshot, encodeSnapshot, MAX_COMPRESSED_SNAPSHOT_BYTES } from '@tabsnap/core';
+import {
+  decodeSnapshot,
+  encodeSnapshot,
+  MAX_COMPRESSED_SNAPSHOT_BYTES,
+} from '@tabsnap/core';
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 import { z } from 'zod';
 
@@ -11,7 +15,8 @@ const MAGIC = new TextEncoder().encode('TABSNAP\0');
 const HEADER_LENGTH_BYTES = 4;
 const PREFIX_BYTES = MAGIC.byteLength + 1 + HEADER_LENGTH_BYTES;
 const MAX_HEADER_BYTES = 4 * 1024;
-const MAX_ENCRYPTED_BYTES = MAX_COMPRESSED_SNAPSHOT_BYTES + MAX_HEADER_BYTES + PREFIX_BYTES + 16;
+const MAX_ENCRYPTED_BYTES =
+  MAX_COMPRESSED_SNAPSHOT_BYTES + MAX_HEADER_BYTES + PREFIX_BYTES + 16;
 
 const ARGON2_MEMORY_KIB = 65_536;
 const ARGON2_ITERATIONS = 3;
@@ -167,7 +172,11 @@ function parseEnvelope(bytes: Uint8Array): {
   };
 }
 
-function deriveKeyBytes(argon2: Argon2, password: string, header: EnvelopeHeader): Uint8Array {
+function deriveKeyBytes(
+  argon2: Argon2,
+  password: string,
+  header: EnvelopeHeader,
+): Uint8Array {
   return argon2.hash(password, {
     salt: fromBase64Url(header.kdf.salt),
     hashLength: AES_KEY_BYTES,
