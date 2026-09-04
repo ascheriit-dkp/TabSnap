@@ -21,4 +21,6 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --no-frozen-lockfile
-      - run: pnpm check
+      - run: pnpm format
+      - run: git diff -- packages/crypto/src/index.ts packages/crypto/src/index.test.ts
+      - run: pnpm lint && pnpm typecheck && pnpm test && pnpm docs:build
