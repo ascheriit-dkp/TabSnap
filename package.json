@@ -10,11 +10,13 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "pnpm docs:build",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm docs:build",
+    "build": "pnpm extension:build && pnpm docs:build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm extension:build && pnpm docs:build",
     "docs:build": "vitepress build docs",
     "docs:dev": "vitepress docs",
     "docs:preview": "vitepress preview docs",
+    "extension:build": "pnpm --filter @tabsnap/chrome-extension build",
+    "extension:dev": "pnpm --filter @tabsnap/chrome-extension dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",

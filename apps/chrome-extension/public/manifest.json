@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "TabSnap",
+  "version": "0.1.0",
+  "description": "Move a browser workspace between machines without a backend.",
+  "minimum_chrome_version": "120",
+  "permissions": ["tabs", "tabGroups"],
+  "action": {
+    "default_title": "TabSnap",
+    "default_popup": "index.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  }
+}
