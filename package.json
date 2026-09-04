@@ -21,9 +21,6 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.base.json --noEmit"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
-  },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "eslint": "10.9.1",
