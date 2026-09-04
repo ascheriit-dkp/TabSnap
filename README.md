@@ -6,8 +6,6 @@ No account. No backend. No sync service.
 
 Capture windows and tabs, encrypt the snapshot, move it yourself, restore it somewhere else.
 
-Still being built.
-
 ## Rules
 
 - snapshot data stays local
@@ -19,7 +17,7 @@ Still being built.
 
 ## Status
 
-Foundation work. Chrome comes first.
+The browser-agnostic snapshot, compression and encryption core is implemented. The Chrome Manifest V3 client is the current Level 1 target.
 
 See the [roadmap](./ROADMAP.md) and [product spec](./docs/product-spec.md).
 
@@ -30,6 +28,14 @@ pnpm install
 pnpm check
 pnpm docs:dev
 ```
+
+Build the unpacked Chrome extension with:
+
+```bash
+pnpm extension:build
+```
+
+Then load `apps/chrome-extension/dist` from `chrome://extensions` with Developer mode enabled.
 
 Node 24+.
 
