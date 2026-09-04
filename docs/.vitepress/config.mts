@@ -7,6 +7,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/' },
+      { text: 'Format', link: '/technical/tabsnap-format' },
       { text: 'Security', link: '/security/' },
       { text: 'Architecture', link: '/architecture/' },
       { text: 'Roadmap', link: '/roadmap' },
@@ -18,6 +19,10 @@ export default defineConfig({
           { text: 'Overview', link: '/guide/' },
           { text: 'Development', link: '/guide/development' },
         ],
+      },
+      {
+        text: 'Technical',
+        items: [{ text: '.tabsnap format', link: '/technical/tabsnap-format' }],
       },
       {
         text: 'Project',
