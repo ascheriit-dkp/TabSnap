@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { extname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import process from 'node:process';
+import { fileURLToPath, URL } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dist = join(root, 'apps/chrome-extension/dist');
@@ -78,4 +79,6 @@ for (const file of await walk(dist)) {
   }
 }
 
-console.log('Extension audit passed: minimal permissions, no host access, no static network path.');
+process.stdout.write(
+  'Extension audit passed: minimal permissions, no host access, no static network path.\n',
+);
