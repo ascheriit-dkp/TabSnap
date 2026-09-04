@@ -21,6 +21,4 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --no-frozen-lockfile
-      - run: pnpm format
-      - run: git diff -- apps/chrome-extension/index.html apps/chrome-extension/src/browser.ts apps/chrome-extension/src/main.ts apps/chrome-extension/src/style.css
-      - run: pnpm lint && pnpm typecheck && pnpm test && pnpm extension:build && pnpm docs:build
+      - run: pnpm check
