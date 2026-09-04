@@ -37,7 +37,7 @@ export interface RestoreReport {
   warnings: string[];
 }
 
-function platformFromChrome(os: chrome.runtime.PlatformOs): Platform {
+function platformFromChrome(os: chrome.runtime.PlatformInfo['os']): Platform {
   switch (os) {
     case 'win':
       return 'windows';
@@ -50,13 +50,15 @@ function platformFromChrome(os: chrome.runtime.PlatformOs): Platform {
   }
 }
 
-function snapshotWindowState(state: chrome.windows.WindowState | undefined): WindowState {
+function snapshotWindowState(state: chrome.windows.Window['state']): WindowState {
   switch (state) {
     case 'maximized':
     case 'minimized':
     case 'fullscreen':
     case 'normal':
       return state;
+    case 'locked-fullscreen':
+      return 'fullscreen';
     default:
       return 'normal';
   }
@@ -192,6 +194,19 @@ function chromeGroupColor(value: string | undefined): chrome.tabGroups.Color | u
   return value as chrome.tabGroups.Color;
 }
 
+function groupTabs(tabIds: [number, ...number[]], windowId: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.group({ tabIds, createProperties: { windowId } }, (groupId) => {
+      const error = chrome.runtime.lastError;
+      if (error !== undefined) {
+        reject(new Error(error.message));
+        return;
+      }
+      resolve(groupId);
+    });
+  });
+}
+
 async function restoreWindow(
   window: WindowSnapshot,
   report: RestoreReport,
@@ -255,11 +270,12 @@ async function restoreWindow(
       .filter((tab) => tab.groupId === group.id)
       .map((tab) => createdTabIdsByOrder.get(tab.order))
       .filter((tabId): tabId is number => tabId !== undefined);
+    const [firstTabId, ...remainingTabIds] = tabIds;
 
-    if (tabIds.length === 0) continue;
+    if (firstTabId === undefined) continue;
 
     try {
-      const groupId = await chrome.tabs.group({ tabIds, createProperties: { windowId } });
+      const groupId = await groupTabs([firstTabId, ...remainingTabIds], windowId);
       const color = chromeGroupColor(group.color);
       await chrome.tabGroups.update(groupId, {
         collapsed: group.collapsed,
