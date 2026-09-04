@@ -1,9 +1,5 @@
-import Argon2, { Argon2Type, Argon2Version } from '@phi-ag/argon2';
-import {
-  decodeSnapshot,
-  encodeSnapshot,
-  MAX_COMPRESSED_SNAPSHOT_BYTES,
-} from '@tabsnap/core';
+import { argon2id } from 'hash-wasm';
+import { decodeSnapshot, encodeSnapshot, MAX_COMPRESSED_SNAPSHOT_BYTES } from '@tabsnap/core';
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 import { z } from 'zod';
 
@@ -15,8 +11,7 @@ const MAGIC = new TextEncoder().encode('TABSNAP\0');
 const HEADER_LENGTH_BYTES = 4;
 const PREFIX_BYTES = MAGIC.byteLength + 1 + HEADER_LENGTH_BYTES;
 const MAX_HEADER_BYTES = 4 * 1024;
-const MAX_ENCRYPTED_BYTES =
-  MAX_COMPRESSED_SNAPSHOT_BYTES + MAX_HEADER_BYTES + PREFIX_BYTES + 16;
+const MAX_ENCRYPTED_BYTES = MAX_COMPRESSED_SNAPSHOT_BYTES + MAX_HEADER_BYTES + PREFIX_BYTES + 16;
 
 const ARGON2_MEMORY_KIB = 65_536;
 const ARGON2_ITERATIONS = 3;
@@ -34,7 +29,11 @@ const headerSchema = z
       .object({
         name: z.literal('argon2id'),
         version: z.literal(19),
-        memoryKiB: z.number().int().min(32 * 1024).max(256 * 1024),
+        memoryKiB: z
+          .number()
+          .int()
+          .min(32 * 1024)
+          .max(256 * 1024),
         iterations: z.number().int().min(1).max(10),
         parallelism: z.number().int().min(1).max(8),
         salt: z.string().min(1).max(128),
@@ -172,20 +171,18 @@ function parseEnvelope(bytes: Uint8Array): {
   };
 }
 
-function deriveKeyBytes(
-  argon2: Argon2,
-  password: string,
-  header: EnvelopeHeader,
-): Uint8Array {
-  return argon2.hash(password, {
+async function deriveKeyBytes(password: string, header: EnvelopeHeader): Promise<Uint8Array> {
+  const key = await argon2id({
+    password: encoder.encode(password),
     salt: fromBase64Url(header.kdf.salt),
-    hashLength: AES_KEY_BYTES,
-    timeCost: header.kdf.iterations,
-    memoryCost: header.kdf.memoryKiB,
+    iterations: header.kdf.iterations,
     parallelism: header.kdf.parallelism,
-    type: Argon2Type.Argon2id,
-    version: Argon2Version.Version13,
-  }).hash;
+    memorySize: header.kdf.memoryKiB,
+    hashLength: AES_KEY_BYTES,
+    outputType: 'binary',
+  });
+
+  return key;
 }
 
 async function importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {
@@ -198,7 +195,6 @@ async function importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {
 export async function encryptSnapshot(
   snapshot: TabSnapSnapshot,
   password: string,
-  argon2: Argon2,
 ): Promise<Uint8Array> {
   assertPassword(password);
 
@@ -221,7 +217,7 @@ export async function encryptSnapshot(
   };
 
   const authenticatedHeader = buildAuthenticatedHeader(header);
-  const key = await importAesKey(deriveKeyBytes(argon2, password, header));
+  const key = await importAesKey(await deriveKeyBytes(password, header));
   const plaintext = await encodeSnapshot(snapshot);
   const ciphertext = await crypto.subtle.encrypt(
     {
@@ -240,11 +236,10 @@ export async function encryptSnapshot(
 export async function decryptSnapshot(
   bytes: Uint8Array,
   password: string,
-  argon2: Argon2,
 ): Promise<TabSnapSnapshot> {
   assertPassword(password);
   const { header, authenticatedHeader, ciphertext } = parseEnvelope(bytes);
-  const key = await importAesKey(deriveKeyBytes(argon2, password, header));
+  const key = await importAesKey(await deriveKeyBytes(password, header));
 
   let plaintext: ArrayBuffer;
   try {
@@ -268,17 +263,15 @@ export async function decryptSnapshot(
 export async function exportSnapshotString(
   snapshot: TabSnapSnapshot,
   password: string,
-  argon2: Argon2,
 ): Promise<string> {
-  return STRING_PREFIX + toBase64Url(await encryptSnapshot(snapshot, password, argon2));
+  return STRING_PREFIX + toBase64Url(await encryptSnapshot(snapshot, password));
 }
 
 export async function importSnapshotString(
   value: string,
   password: string,
-  argon2: Argon2,
 ): Promise<TabSnapSnapshot> {
   const trimmed = value.trim();
   if (!trimmed.startsWith(STRING_PREFIX)) throw new Error('Invalid TabSnap string.');
-  return decryptSnapshot(fromBase64Url(trimmed.slice(STRING_PREFIX.length)), password, argon2);
+  return decryptSnapshot(fromBase64Url(trimmed.slice(STRING_PREFIX.length)), password);
 }
