@@ -1,6 +1,7 @@
 import { parseTabSnapSnapshot, type TabSnapSnapshot } from '@tabsnap/schema';
 
 export const MAX_DECOMPRESSED_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+export const MAX_COMPRESSED_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -18,6 +19,12 @@ export function deserializeSnapshot(bytes: Uint8Array): TabSnapSnapshot {
   const text = decoder.decode(bytes);
   const input: unknown = JSON.parse(text);
   return parseTabSnapSnapshot(input);
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 async function readStreamWithLimit(
@@ -57,15 +64,23 @@ async function readStreamWithLimit(
 }
 
 export async function compressSnapshot(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes])
+  if (bytes.byteLength > MAX_DECOMPRESSED_SNAPSHOT_BYTES) {
+    throw new Error('Snapshot exceeds the maximum decoded size.');
+  }
+
+  const stream = new Blob([toArrayBuffer(bytes)])
     .stream()
     .pipeThrough(new CompressionStream('gzip')) as ReadableStream<Uint8Array>;
 
-  return readStreamWithLimit(stream, MAX_DECOMPRESSED_SNAPSHOT_BYTES);
+  return readStreamWithLimit(stream, MAX_COMPRESSED_SNAPSHOT_BYTES);
 }
 
 export async function decompressSnapshot(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes])
+  if (bytes.byteLength > MAX_COMPRESSED_SNAPSHOT_BYTES) {
+    throw new Error('Compressed snapshot exceeds the maximum size.');
+  }
+
+  const stream = new Blob([toArrayBuffer(bytes)])
     .stream()
     .pipeThrough(new DecompressionStream('gzip')) as ReadableStream<Uint8Array>;
 
