@@ -1,4 +1,9 @@
-import { decryptSnapshot, encryptSnapshot, exportSnapshotString, importSnapshotString } from '@tabsnap/crypto';
+import {
+  decryptSnapshot,
+  encryptSnapshot,
+  exportSnapshotString,
+  importSnapshotString,
+} from '@tabsnap/crypto';
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 
 import { captureWorkspace, restoreWorkspace } from './browser.js';
@@ -44,7 +49,11 @@ function setStatus(message: string, kind: 'info' | 'success' | 'error' = 'info')
   status.dataset.kind = kind;
 }
 
-function snapshotStats(snapshot: TabSnapSnapshot): { windows: number; tabs: number; groups: number } {
+function snapshotStats(snapshot: TabSnapSnapshot): {
+  windows: number;
+  tabs: number;
+  groups: number;
+} {
   return {
     windows: snapshot.windows.length,
     tabs: snapshot.windows.reduce((total, window) => total + window.tabs.length, 0),
@@ -147,7 +156,10 @@ importStringButton.addEventListener('click', () => {
   void run('Decrypting string', async () => {
     const snapshot = await importSnapshotString(inputString.value, password());
     showSnapshot(snapshot, 'Imported');
-    setStatus('Encrypted string validated and decrypted locally. Review the preview before restore.', 'success');
+    setStatus(
+      'Encrypted string validated and decrypted locally. Review the preview before restore.',
+      'success',
+    );
   });
 });
 
@@ -161,7 +173,10 @@ inputFile.addEventListener('change', () => {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const snapshot = await decryptSnapshot(bytes, password());
       showSnapshot(snapshot, 'Imported');
-      setStatus('Encrypted file validated and decrypted locally. Review the preview before restore.', 'success');
+      setStatus(
+        'Encrypted file validated and decrypted locally. Review the preview before restore.',
+        'success',
+      );
     } finally {
       inputFile.value = '';
     }
