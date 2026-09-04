@@ -29,13 +29,9 @@ const headerSchema = z
       .object({
         name: z.literal('argon2id'),
         version: z.literal(19),
-        memoryKiB: z
-          .number()
-          .int()
-          .min(32 * 1024)
-          .max(256 * 1024),
-        iterations: z.number().int().min(1).max(10),
-        parallelism: z.number().int().min(1).max(8),
+        memoryKiB: z.literal(ARGON2_MEMORY_KIB),
+        iterations: z.literal(ARGON2_ITERATIONS),
+        parallelism: z.literal(ARGON2_PARALLELISM),
         salt: z.string().min(1).max(128),
       })
       .strict(),
