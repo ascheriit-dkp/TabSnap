@@ -98,7 +98,10 @@ export class CompanionClient {
   async listSnapshots(): Promise<CompanionSnapshotEntry[]> {
     const response = await this.#request('/v1/snapshots');
     const payload = await parseJsonObject(response, 'Companion returned an invalid snapshot list.');
-    if (payload.protocolVersion !== COMPANION_PROTOCOL_VERSION || !Array.isArray(payload.snapshots)) {
+    if (
+      payload.protocolVersion !== COMPANION_PROTOCOL_VERSION ||
+      !Array.isArray(payload.snapshots)
+    ) {
       throw new Error('Companion snapshot list is incompatible.');
     }
 
@@ -153,7 +156,11 @@ export class CompanionClient {
     const response = await this.#request('/v1/snapshot', {
       headers: { 'X-TabSnap-Name': name },
     });
-    const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+    const contentType = response.headers
+      .get('content-type')
+      ?.split(';', 1)[0]
+      ?.trim()
+      .toLowerCase();
     if (contentType !== 'application/octet-stream') {
       throw new Error('Companion returned an invalid snapshot response.');
     }
@@ -210,7 +217,10 @@ function copyArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
-async function parseJsonObject(response: Response, fallback: string): Promise<Record<string, unknown>> {
+async function parseJsonObject(
+  response: Response,
+  fallback: string,
+): Promise<Record<string, unknown>> {
   let value: unknown;
   try {
     value = await response.json();
