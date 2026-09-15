@@ -223,11 +223,14 @@ test('captures and restores a real Chrome workspace non-destructively', async ()
         if (secondTab.id === undefined) throw new Error('Chromium did not create the second tab.');
 
         const groupId = await new Promise<number>((resolveGroup, rejectGroup) => {
-          chrome.tabs.group({ tabIds: [secondTab.id!] }, (createdGroupId) => {
-            const error = chrome.runtime.lastError;
-            if (error !== undefined) rejectGroup(new Error(error.message));
-            else resolveGroup(createdGroupId);
-          });
+          chrome.tabs.group(
+            { tabIds: [secondTab.id!], createProperties: { windowId } },
+            (createdGroupId) => {
+              const error = chrome.runtime.lastError;
+              if (error !== undefined) rejectGroup(new Error(error.message));
+              else resolveGroup(createdGroupId);
+            },
+          );
         });
         await chrome.tabGroups.update(groupId, {
           title: 'Work',
