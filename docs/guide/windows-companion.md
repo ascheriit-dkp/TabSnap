@@ -6,39 +6,70 @@ The companion is not required for the Chrome-only Level 1 workflow. It exists to
 
 ## Portable layout
 
-M16 derives storage from the executable location:
+The companion derives its portable root from the executable location:
 
 ```text
 TabSnap/
 ├── tabsnap-companion.exe
+├── tabsnap-companion.conf   # created only after an explicit storage-mode change
 └── snapshots/
 ```
 
-If that directory lives on a USB drive, the default snapshot library lives on the same drive automatically.
+Portable mode is the default when no configuration file exists. If the executable lives on a USB drive, the default snapshot library therefore lives on the same drive automatically.
 
-The M16 executable does not install a Windows service, write machine-wide registry keys, copy itself into `Program Files`, or require administrator privileges.
+The companion does not install a Windows service, write machine-wide registry keys, copy itself into `Program Files`, or require administrator privileges.
 
-## Current commands
+## Commands
 
 ```text
 tabsnap-companion info
 tabsnap-companion init
+tabsnap-companion storage show
+tabsnap-companion storage set portable
+tabsnap-companion storage set local
+tabsnap-companion storage set custom <absolute-path>
 ```
 
-`info` prints the executable, portable root and snapshot-library paths.
+`info` shows the executable location, portable root, active storage mode, resolved snapshot directory and Windows drive hint.
 
-`init` creates only the `snapshots` directory next to the executable.
+`init` creates and write-tests the active snapshot directory without changing the selected mode.
 
-This CLI is the foundation used to test portable filesystem behavior. A native companion UI is a later Level 2 milestone.
+`storage set ...` resolves the requested location, creates it when needed, writes and deletes a small probe file to verify writability, then persists the selection next to the executable. A failed write test does not replace the existing selection.
 
-## Storage policy
+## Storage modes
 
-M16 deliberately uses one deterministic rule: storage is next to the executable.
+### Portable
 
-M17 will add explicit portable, local and custom modes plus Windows removable-drive hints. TabSnap will not assume that every external USB SSD is reported by Windows as a removable drive.
+`portable` stores snapshots in `snapshots/` next to `tabsnap-companion.exe`. It is the default and requires no config file.
+
+### Local
+
+`local` stores snapshots in:
+
+```text
+%LOCALAPPDATA%\TabSnap\snapshots
+```
+
+This mode is explicit. TabSnap does not silently move a portable library into the Windows user profile.
+
+### Custom
+
+`custom` stores snapshots directly in an absolute directory selected by the user. Relative paths are rejected so the meaning of a saved configuration cannot change with the process working directory.
+
+## Removable-drive hint
+
+On Windows the companion asks `GetDriveTypeW` for a best-effort drive classification such as `removable`, `fixed`, `remote` or `optical`.
+
+This value is informational only. In particular, a USB SSD may be reported as `fixed`; TabSnap never uses that result to override the selected storage mode or to decide whether portable storage is allowed.
+
+## Storage configuration
+
+The optional `tabsnap-companion.conf` file stays next to the executable. It records only the storage mode and, for custom mode, the chosen path. It contains no snapshot data, passwords, browser data or authentication secrets.
+
+Deleting the config file returns the companion to portable mode on the next launch.
 
 ## Security boundary
 
-The M16 companion has no networking code and no third-party runtime dependency. It only discovers its own executable path and creates a local directory when asked.
+The M17 companion still has no networking code and no third-party runtime dependency. Storage paths are validated before activation, and the write test is removed immediately after it succeeds.
 
 Later local communication with browser extensions will be loopback-only, versioned and authenticated before it is allowed to move snapshots.
