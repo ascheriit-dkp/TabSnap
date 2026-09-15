@@ -69,9 +69,19 @@ const networkPatterns = [
   { name: 'sendBeacon', pattern: /\bsendBeacon\b/u },
 ];
 
+function stripKnownInertParserUrls(contents, extension) {
+  if (extension !== '.js') return contents;
+
+  // Zod validates IPv6 strings by parsing a synthetic `http://[IPv6]` URL locally.
+  // This exact expression is inert: it is passed only to the URL constructor, not a network API.
+  return contents.replace(/new URL\(`http:\/\/\[\$\{[^}]+\}\]`\)/gu, '');
+}
+
 for (const file of await walk(dist)) {
-  if (!textExtensions.has(extname(file)) || file.endsWith('.map')) continue;
-  const contents = await readFile(file, 'utf8');
+  const extension = extname(file);
+  if (!textExtensions.has(extension) || file.endsWith('.map')) continue;
+
+  const contents = stripKnownInertParserUrls(await readFile(file, 'utf8'), extension);
   const displayPath = relative(root, file);
 
   for (const { name, pattern } of networkPatterns) {
