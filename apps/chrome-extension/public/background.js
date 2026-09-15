@@ -1,3 +1,5 @@
+/* global chrome */
+
 chrome.action.onClicked.addListener(async () => {
   const url = chrome.runtime.getURL('index.html');
   const [existing] = await chrome.tabs.query({ url });
