@@ -79,7 +79,10 @@ export class CompanionClient {
 
   async status(): Promise<CompanionStatus> {
     const response = await this.#request('/v1/status');
-    const payload = await parseJsonObject(response, 'Companion returned an invalid status response.');
+    const payload = await parseJsonObject(
+      response,
+      'Companion returned an invalid status response.',
+    );
     const protocolVersion = payload.protocolVersion;
     const transport = payload.transport;
     const authentication = payload.authentication;
@@ -137,7 +140,10 @@ export class CompanionClient {
       },
       body: copyArrayBuffer(encryptedBytes),
     });
-    const payload = await parseJsonObject(response, 'Companion returned an invalid store response.');
+    const payload = await parseJsonObject(
+      response,
+      'Companion returned an invalid store response.',
+    );
     if (
       typeof payload.name !== 'string' ||
       typeof payload.size !== 'number' ||
