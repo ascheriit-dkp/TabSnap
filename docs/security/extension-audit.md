@@ -27,6 +27,14 @@ The built `manifest.json` must:
 
 Any permission expansion is a security-significant product change and must update the threat model and this audit document.
 
+## Persistent workspace invariant
+
+The toolbar action must not use `action.default_popup`.
+
+Level 1 beta uses the packaged `background.js` service worker only to open or focus the persistent local `index.html` workspace. This prevents long capture, Argon2id, decryption and restore operations from depending on the lifetime of an ephemeral popup.
+
+The launcher receives no extra permission and is covered by the same final-artifact network audit as the rest of the extension JavaScript.
+
 ## CSP invariant
 
 Extension pages must load scripts from the packaged extension only.
