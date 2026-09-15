@@ -97,7 +97,7 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - name: Validate release version
         run: |
-          node --input-type=module -e "import fs from 'node:fs'; const expected=process.env.RELEASE_VERSION; const root=JSON.parse(fs.readFileSync('package.json','utf8')); const app=JSON.parse(fs.readFileSync('apps/chrome-extension/package.json','utf8')); const manifest=JSON.parse(fs.readFileSync('apps/chrome-extension/public/manifest.json','utf8')); if(root.version!==expected || app.version!==expected || manifest.version_name!==expected) throw new Error('Release tag does not match package/manifest version_name');"
+          node --input-type=module -e "import fs from 'node:fs'; const expected=process.env.RELEASE_VERSION; const root=JSON.parse(fs.readFileSync('package.json','utf8')); const app=JSON.parse(fs.readFileSync('apps/chrome-extension/package.json','utf8')); const chromium=JSON.parse(fs.readFileSync('apps/chrome-extension/public/manifest.json','utf8')); const firefox=JSON.parse(fs.readFileSync('apps/chrome-extension/firefox-manifest.json','utf8')); if(root.version!==expected || app.version!==expected || chromium.version_name!==expected || firefox.version_name!==expected) throw new Error('Release tag does not match package/manifest version_name');"
       - run: pnpm check
       - name: Package Chrome extension
         run: |
@@ -118,6 +118,18 @@ jobs:
           find . -type f -print0 | sort -z | xargs -0 zip -X "$GITHUB_WORKSPACE/$EDGE_ARCHIVE"
           cd "$GITHUB_WORKSPACE"
           sha256sum "$EDGE_ARCHIVE" > "$EDGE_ARCHIVE.sha256"
+      - name: Package Firefox extension
+        run: |
+          pnpm extension:firefox-build
+          pnpm extension:firefox-audit
+          pnpm extension:firefox-lint
+          FIREFOX_ARCHIVE="tabsnap-firefox-${RELEASE_TAG}.zip"
+          echo "FIREFOX_ARCHIVE=$FIREFOX_ARCHIVE" >> "$GITHUB_ENV"
+          cd apps/chrome-extension/dist-firefox
+          find . -type f -exec touch -t 198001010000 {} +
+          find . -type f -print0 | sort -z | xargs -0 zip -X "$GITHUB_WORKSPACE/$FIREFOX_ARCHIVE"
+          cd "$GITHUB_WORKSPACE"
+          sha256sum "$FIREFOX_ARCHIVE" > "$FIREFOX_ARCHIVE.sha256"
       - uses: actions/download-artifact@v5
         with:
           name: tabsnap-companion-release
@@ -154,6 +166,8 @@ jobs:
             "$CHROME_ARCHIVE.sha256"
             "$EDGE_ARCHIVE"
             "$EDGE_ARCHIVE.sha256"
+            "$FIREFOX_ARCHIVE"
+            "$FIREFOX_ARCHIVE.sha256"
             "$COMPANION_ARCHIVE"
             "$COMPANION_CHECKSUM"
           )

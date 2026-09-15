@@ -6,6 +6,35 @@ The project uses Semantic Versioning once releases start.
 
 ## Unreleased
 
+## 0.3.0-alpha.2 - 2026-09-16
+
+Firefox adapter alpha.
+
+### Added
+
+- Firefox Desktop 139+ runtime detection and `source.browser: firefox`
+- shared WebExtension capture/restore engine with thin Chromium and Firefox adapters
+- Firefox-specific restore handling for privileged URLs and `about:newtab`
+- Firefox window-state normalization for the `docked` state
+- production Firefox Manifest V3 package with stable Gecko ID
+- Mozilla `web-ext lint` validation in CI
+- deterministic Firefox ZIP and SHA-256 CI/release artifacts
+- Firefox installation, compatibility and architecture documentation
+
+### Verification
+
+- Firefox runtime and restore-policy unit tests
+- production Firefox package audit
+- Mozilla `web-ext lint`
+- existing Chromium browser integration, Edge package and Windows companion checks remain required
+
+### Privacy
+
+- no backend, account, telemetry or analytics
+- no new browser permissions
+- `tabs` and `tabGroups` remain the only required extension permissions
+- companion loopback access remains optional and user-triggered
+
 ## 0.1.0-beta.1 - 2026-09-15
 
 Level 1 Chrome beta.
