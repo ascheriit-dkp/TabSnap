@@ -29,6 +29,18 @@ interface WorkspaceInspection {
   }>;
 }
 
+function hasExpectedRestore(inspection: WorkspaceInspection): boolean {
+  const restored = inspection.restored;
+  return (
+    restored !== null &&
+    restored.firstPinned &&
+    restored.firstActive &&
+    restored.groupTitle === 'Work' &&
+    restored.groupColor === 'blue' &&
+    restored.groupCollapsed === true
+  );
+}
+
 async function listen(server: Server): Promise<number> {
   await new Promise<void>((resolveListen, reject) => {
     const onError = (error: Error) => reject(error);
@@ -272,27 +284,16 @@ test('captures and restores a real Chrome workspace non-destructively', async ()
       )
       .toBe(4);
 
-    await expect
-      .poll(() => inspectWorkspace(extensionPage, urlA, urlB, originalWorkspace.windowId), {
-        message: 'A second window should reproduce the fixture tabs, pinning and group metadata.',
-        timeout: 10_000,
-      })
-      .toMatchObject({
-        restored: {
-          firstPinned: true,
-          firstActive: true,
-          groupTitle: 'Work',
-          groupColor: 'blue',
-          groupCollapsed: true,
-        },
-      });
+    let inspection = await inspectWorkspace(extensionPage, urlA, urlB, originalWorkspace.windowId);
+    for (let attempt = 0; attempt < 40 && !hasExpectedRestore(inspection); attempt += 1) {
+      await extensionPage.waitForTimeout(250);
+      inspection = await inspectWorkspace(extensionPage, urlA, urlB, originalWorkspace.windowId);
+    }
 
-    const inspection = await inspectWorkspace(
-      extensionPage,
-      urlA,
-      urlB,
-      originalWorkspace.windowId,
-    );
+    if (!hasExpectedRestore(inspection)) {
+      throw new Error(`Restored workspace mismatch:\n${JSON.stringify(inspection, null, 2)}`);
+    }
+
     expect(inspection.restored).not.toBeNull();
     expect(inspection.restored?.windowId).not.toBe(originalWorkspace.windowId);
 
