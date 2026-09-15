@@ -6,12 +6,13 @@ import {
 } from '@tabsnap/crypto';
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 
-import { captureWorkspace, restoreWorkspace } from './browser.js';
+import { captureWorkspace, currentBrowser, restoreWorkspace } from './browser.js';
 import {
   CompanionClient,
   COMPANION_ORIGIN_PERMISSION,
   parseCompanionPairingCode,
 } from './companion.js';
+import { assessCrossBrowserCompatibility } from './cross-browser.js';
 import './style.css';
 
 const MAX_FILE_BYTES = 65 * 1024 * 1024;
@@ -94,12 +95,26 @@ function snapshotStats(snapshot: TabSnapSnapshot): {
 function showSnapshot(snapshot: TabSnapSnapshot, origin: string): void {
   currentSnapshot = snapshot;
   const stats = snapshotStats(snapshot);
-  preview.classList.remove('empty');
-  preview.textContent = [
+  const compatibility = assessCrossBrowserCompatibility(snapshot, currentBrowser());
+  const lines = [
     `${origin}: ${stats.windows} window${stats.windows === 1 ? '' : 's'}, ${stats.tabs} tab${stats.tabs === 1 ? '' : 's'}, ${stats.groups} group${stats.groups === 1 ? '' : 's'}`,
     `Source: ${snapshot.source.browser}${snapshot.source.browserVersion === undefined ? '' : ` ${snapshot.source.browserVersion}`} on ${snapshot.source.platform}`,
     `Captured: ${new Date(snapshot.createdAt).toLocaleString()}`,
-  ].join('\n');
+  ];
+
+  if (compatibility.crossBrowser) {
+    lines.push(
+      '',
+      `Cross-browser restore: best effort (${compatibility.source} → ${compatibility.target}).`,
+      compatibility.knownNonPortableTabs === 0
+        ? 'No known non-portable tabs were found.'
+        : `${compatibility.knownNonPortableTabs} known non-portable tab${compatibility.knownNonPortableTabs === 1 ? '' : 's'} may be skipped.`,
+      ...compatibility.notes,
+    );
+  }
+
+  preview.classList.remove('empty');
+  preview.textContent = lines.join('\n');
   syncButtons();
 }
 
