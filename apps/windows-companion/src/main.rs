@@ -1,5 +1,6 @@
 pub mod library;
 pub mod protocol;
+pub mod ui;
 
 use std::env;
 use std::error::Error;
@@ -19,6 +20,7 @@ fn print_help() {
     println!("Usage:");
     println!("  tabsnap-companion info");
     println!("  tabsnap-companion init");
+    println!("  tabsnap-companion ui");
     println!("  tabsnap-companion serve");
     println!("  tabsnap-companion storage show");
     println!("  tabsnap-companion storage set portable");
@@ -137,6 +139,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             println!("Storage initialized and writable.");
             print_storage(&layout, &storage);
         }
+        "ui" => ui::run()?,
         "serve" => serve(&layout)?,
         "storage" => match args.get(2).map(String::as_str) {
             Some("show") => {
