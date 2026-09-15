@@ -1,0 +1,36 @@
+name: M27 format
+
+on:
+  push:
+    branches:
+      - feat/cross-browser-compatibility
+    paths:
+      - .github/workflows/m27-format.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/cross-browser-compatibility
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm exec prettier --write apps/chrome-extension/src/cross-browser.ts docs/technical/cross-browser-compatibility.md
+      - name: Commit formatting
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/chrome-extension/src/cross-browser.ts docs/technical/cross-browser-compatibility.md
+          git commit -m "style: format cross-browser compatibility"
+          git push origin HEAD:feat/cross-browser-compatibility
