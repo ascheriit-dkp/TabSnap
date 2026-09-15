@@ -8,6 +8,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/' },
       { text: 'Chrome', link: '/guide/chrome-extension' },
+      { text: 'Edge', link: '/guide/edge-extension' },
       { text: 'Format', link: '/technical/tabsnap-format' },
       { text: 'Security', link: '/security/' },
       { text: 'Architecture', link: '/architecture/' },
@@ -19,6 +20,8 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/guide/' },
           { text: 'Chrome extension', link: '/guide/chrome-extension' },
+          { text: 'Microsoft Edge', link: '/guide/edge-extension' },
+          { text: 'Windows companion', link: '/guide/windows-companion' },
           { text: 'Development', link: '/guide/development' },
         ],
       },
