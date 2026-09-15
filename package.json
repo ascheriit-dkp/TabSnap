@@ -18,6 +18,7 @@
     "extension:audit": "node scripts/audit-extension.mjs",
     "extension:build": "pnpm --filter @tabsnap/chrome-extension build",
     "extension:dev": "pnpm --filter @tabsnap/chrome-extension dev",
+    "extension:e2e": "playwright test --config=playwright.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
     "eslint": "10.9.1",
     "prettier": "3.9.6",
     "typescript": "6.0.2",
