@@ -1,4 +1,4 @@
-mod library;
+pub mod library;
 
 use std::env;
 use std::error::Error;
