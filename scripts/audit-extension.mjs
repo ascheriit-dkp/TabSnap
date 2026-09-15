@@ -115,11 +115,14 @@ for (const file of await walk(dist)) {
         contents.includes('http://127.0.0.1:'),
         `${displayPath} uses fetch without the fixed IPv4 loopback endpoint.`,
       );
+
+      // Packaged validators such as Zod may construct `http://[${value}]` only to parse
+      // IPv6 syntax with the URL class. That string is not a network destination or fetch target.
       rejectMatch(
         contents,
         displayPath,
         'non-loopback absolute HTTP(S) URL',
-        /https?:\/\/(?!127\.0\.0\.1:)/u,
+        /https?:\/\/(?!127\.0\.0\.1:|\[)/u,
       );
     }
   }
