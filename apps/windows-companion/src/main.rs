@@ -1,8 +1,11 @@
+mod library;
+
 use std::env;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use library::SnapshotLibrary;
 use tabsnap_companion::{
     PortableLayout, ResolvedStorage, StorageMode, activate_storage, load_storage_mode,
     resolve_storage, validate_storage_dir,
@@ -18,6 +21,9 @@ fn print_help() {
     println!("  tabsnap-companion storage set portable");
     println!("  tabsnap-companion storage set local");
     println!("  tabsnap-companion storage set custom <absolute-path>");
+    println!("  tabsnap-companion library list");
+    println!("  tabsnap-companion library import <snapshot.tabsnap>");
+    println!("  tabsnap-companion library export <file-name.tabsnap> <destination-directory>");
 }
 
 fn print_storage(layout: &PortableLayout, storage: &ResolvedStorage) {
@@ -54,6 +60,53 @@ fn parse_storage_mode(args: &[String]) -> Result<StorageMode, Box<dyn Error>> {
     }
 }
 
+fn snapshot_library(layout: &PortableLayout) -> Result<SnapshotLibrary, Box<dyn Error>> {
+    let mode = load_storage_mode(layout)?;
+    let storage = resolve_storage(layout, &mode)?;
+    Ok(SnapshotLibrary::new(storage.snapshots_dir))
+}
+
+fn run_library_command(
+    layout: &PortableLayout,
+    args: &[String],
+) -> Result<(), Box<dyn Error>> {
+    let library = snapshot_library(layout)?;
+
+    match args.get(2).map(String::as_str) {
+        Some("list") => {
+            let entries = library.list()?;
+            println!("library: {}", library.root().display());
+            println!("snapshots: {}", entries.len());
+            for entry in entries {
+                println!("{}\t{}", entry.size, entry.file_name);
+            }
+        }
+        Some("import") => {
+            let source = args.get(3).ok_or("Import requires a .tabsnap file path.")?;
+            let entry = library.import_file(Path::new(source))?;
+            println!("Imported opaque encrypted snapshot.");
+            println!("file: {}", entry.file_name);
+            println!("bytes: {}", entry.size);
+            println!("path: {}", entry.path.display());
+        }
+        Some("export") => {
+            let file_name = args
+                .get(3)
+                .ok_or("Export requires a library .tabsnap file name.")?;
+            let destination = args
+                .get(4)
+                .ok_or("Export requires a destination directory.")?;
+            let exported = library.export_file(file_name, Path::new(destination))?;
+            println!("Exported opaque encrypted snapshot.");
+            println!("path: {}", exported.display());
+        }
+        Some(other) => return Err(format!("Unknown library command: {other}.").into()),
+        None => return Err("Missing library command. Use list, import or export.".into()),
+    }
+
+    Ok(())
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     let command = args.get(1).map(String::as_str).unwrap_or("info");
@@ -85,6 +138,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             None => return Err("Missing storage command. Use show or set.".into()),
         },
+        "library" => run_library_command(&layout, &args)?,
         "help" | "--help" | "-h" => print_help(),
         other => {
             return Err(format!("Unknown command: {other}. Use --help for usage.").into());
