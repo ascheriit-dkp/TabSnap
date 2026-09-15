@@ -4,6 +4,15 @@ import { resolve } from 'node:path';
 
 import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test';
 
+interface RestoredWorkspaceState {
+  windowId: number;
+  firstPinned: boolean;
+  firstActive: boolean;
+  groupTitle: string | undefined;
+  groupColor: string | undefined;
+  groupCollapsed: boolean | undefined;
+}
+
 async function listen(server: Server): Promise<number> {
   await new Promise<void>((resolveListen, reject) => {
     const onError = (error: Error) => reject(error);
@@ -68,6 +77,52 @@ async function openExtensionPage(context: BrowserContext): Promise<Page> {
 
   await page.goto(`chrome-extension://${extensionId}/index.html`);
   return page;
+}
+
+async function inspectRestoredWorkspace(
+  page: Page,
+  firstUrl: string,
+  secondUrl: string,
+  originalWindowId: number,
+): Promise<RestoredWorkspaceState | null> {
+  return page.evaluate(
+    async ({ expectedFirstUrl, expectedSecondUrl, excludedWindowId }) => {
+      const tabUrl = (tab: chrome.tabs.Tab) => tab.url ?? tab.pendingUrl;
+      const windows = await chrome.windows.getAll({
+        populate: true,
+        windowTypes: ['normal'],
+      });
+      const candidate = windows.find((window) => {
+        if (window.id === excludedWindowId) return false;
+        const urls = new Set((window.tabs ?? []).map(tabUrl));
+        return urls.has(expectedFirstUrl) && urls.has(expectedSecondUrl);
+      });
+      if (candidate?.id === undefined) return null;
+
+      const firstTab = candidate.tabs?.find((tab) => tabUrl(tab) === expectedFirstUrl);
+      const secondTab = candidate.tabs?.find((tab) => tabUrl(tab) === expectedSecondUrl);
+      if (firstTab === undefined || secondTab === undefined) return null;
+
+      const group =
+        secondTab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE
+          ? undefined
+          : await chrome.tabGroups.get(secondTab.groupId);
+
+      return {
+        windowId: candidate.id,
+        firstPinned: firstTab.pinned,
+        firstActive: firstTab.active,
+        groupTitle: group?.title,
+        groupColor: group?.color,
+        groupCollapsed: group?.collapsed,
+      };
+    },
+    {
+      expectedFirstUrl: firstUrl,
+      expectedSecondUrl: secondUrl,
+      excludedWindowId: originalWindowId,
+    },
+  );
 }
 
 test('captures and restores a real Chrome workspace non-destructively', async () => {
@@ -140,6 +195,20 @@ test('captures and restores a real Chrome workspace non-destructively', async ()
 
     await expect
       .poll(() =>
+        extensionPage.evaluate(
+          async ({ firstUrl, secondUrl }) => {
+            const tabs = await chrome.tabs.query({});
+            return [firstUrl, secondUrl].every((url) =>
+              tabs.some((tab) => (tab.url ?? tab.pendingUrl) === url && tab.status === 'complete'),
+            );
+          },
+          { firstUrl: urlA, secondUrl: urlB },
+        ),
+      )
+      .toBe(true);
+
+    await expect
+      .poll(() =>
         extensionPage.evaluate(async () => {
           const windows = await chrome.windows.getAll({ windowTypes: ['normal'] });
           return windows.length;
@@ -168,48 +237,30 @@ test('captures and restores a real Chrome workspace non-destructively', async ()
       )
       .toBe(4);
 
-    const restored = await extensionPage.evaluate(
-      async ({ firstUrl, secondUrl, originalWindowId }) => {
-        const windows = await chrome.windows.getAll({
-          populate: true,
-          windowTypes: ['normal'],
-        });
-        const candidate = windows.find((window) => {
-          if (window.id === originalWindowId) return false;
-          const urls = new Set((window.tabs ?? []).map((tab) => tab.url));
-          return urls.has(firstUrl) && urls.has(secondUrl);
-        });
-        if (candidate?.id === undefined) return null;
+    await expect
+      .poll(
+        () => inspectRestoredWorkspace(extensionPage, urlA, urlB, originalWorkspace.windowId),
+        {
+          message: 'A second window should reproduce the fixture tabs, pinning and group metadata.',
+          timeout: 10_000,
+        },
+      )
+      .toMatchObject({
+        firstPinned: true,
+        firstActive: true,
+        groupTitle: 'Work',
+        groupColor: 'blue',
+        groupCollapsed: true,
+      });
 
-        const firstTab = candidate.tabs?.find((tab) => tab.url === firstUrl);
-        const secondTab = candidate.tabs?.find((tab) => tab.url === secondUrl);
-        if (firstTab === undefined || secondTab === undefined) return null;
-        if (secondTab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) return null;
-
-        const group = await chrome.tabGroups.get(secondTab.groupId);
-        return {
-          windowId: candidate.id,
-          firstPinned: firstTab.pinned,
-          firstActive: firstTab.active,
-          groupTitle: group.title,
-          groupColor: group.color,
-          groupCollapsed: group.collapsed,
-        };
-      },
-      {
-        firstUrl: urlA,
-        secondUrl: urlB,
-        originalWindowId: originalWorkspace.windowId,
-      },
+    const restored = await inspectRestoredWorkspace(
+      extensionPage,
+      urlA,
+      urlB,
+      originalWorkspace.windowId,
     );
-
     expect(restored).not.toBeNull();
     expect(restored?.windowId).not.toBe(originalWorkspace.windowId);
-    expect(restored?.firstPinned).toBe(true);
-    expect(restored?.firstActive).toBe(true);
-    expect(restored?.groupTitle).toBe('Work');
-    expect(restored?.groupColor).toBe('blue');
-    expect(restored?.groupCollapsed).toBe(true);
 
     const originalStillExists = await extensionPage.evaluate(async (windowId) => {
       try {
