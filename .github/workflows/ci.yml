@@ -21,9 +21,7 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --no-frozen-lockfile
-      - run: pnpm format
-      - run: git diff -- tests/browser/chrome-extension.e2e.ts
-      - run: pnpm lint && pnpm typecheck && pnpm test && pnpm extension:build && pnpm extension:audit && pnpm docs:build
+      - run: pnpm check
 
   browser-integration:
     needs: check
