@@ -75,7 +75,13 @@ for (const file of await walk(dist)) {
   const displayPath = relative(root, file);
 
   for (const { name, pattern } of networkPatterns) {
-    assert(!pattern.test(contents), `${displayPath} contains ${name}.`);
+    const match = pattern.exec(contents);
+    if (match === null) continue;
+
+    const start = Math.max(0, match.index - 120);
+    const end = Math.min(contents.length, match.index + match[0].length + 180);
+    const context = contents.slice(start, end).replaceAll('\n', ' ');
+    fail(`${displayPath} contains ${name} near ${JSON.stringify(context)}.`);
   }
 }
 
