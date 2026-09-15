@@ -37,6 +37,25 @@ function snapshot(): TabSnapSnapshot {
   };
 }
 
+function tamperHeaderNumber(encrypted: Uint8Array, from: string, to: string): Uint8Array {
+  if (from.length !== to.length) throw new Error('Header replacement must preserve byte length.');
+
+  const copy = encrypted.slice();
+  const headerLength = new DataView(copy.buffer, copy.byteOffset + 9, 4).getUint32(0, false);
+  const headerStart = 13;
+  const headerEnd = headerStart + headerLength;
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const header = decoder.decode(copy.subarray(headerStart, headerEnd));
+  const replaced = header.replace(from, to);
+
+  if (replaced === header) throw new Error(`Could not find ${from} in encrypted header.`);
+  const bytes = encoder.encode(replaced);
+  if (bytes.byteLength !== headerLength) throw new Error('Header replacement changed byte length.');
+  copy.set(bytes, headerStart);
+  return copy;
+}
+
 describe('Base64URL', () => {
   it('round-trips bytes', () => {
     const bytes = crypto.getRandomValues(new Uint8Array(257));
@@ -80,6 +99,18 @@ describe('encrypted snapshots', () => {
     await expect(decryptSnapshot(encrypted, 'correct horse battery staple')).rejects.toThrow(
       'Unable to decrypt snapshot.',
     );
+  });
+
+  it('rejects attacker-controlled Argon2 memory before running a different KDF profile', async () => {
+    const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple');
+    const tampered = tamperHeaderNumber(encrypted, '"memoryKiB":65536', '"memoryKiB":65537');
+    await expect(decryptSnapshot(tampered, 'correct horse battery staple')).rejects.toThrow();
+  });
+
+  it('rejects attacker-controlled Argon2 iterations before running a different KDF profile', async () => {
+    const encrypted = await encryptSnapshot(snapshot(), 'correct horse battery staple');
+    const tampered = tamperHeaderNumber(encrypted, '"iterations":3', '"iterations":9');
+    await expect(decryptSnapshot(tampered, 'correct horse battery staple')).rejects.toThrow();
   });
 
   it('rejects weak passwords', async () => {

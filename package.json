@@ -11,10 +11,11 @@
   },
   "scripts": {
     "build": "pnpm extension:build && pnpm docs:build",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm extension:build && pnpm docs:build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm extension:build && pnpm extension:audit && pnpm docs:build",
     "docs:build": "vitepress build docs",
     "docs:dev": "vitepress docs",
     "docs:preview": "vitepress preview docs",
+    "extension:audit": "node scripts/audit-extension.mjs",
     "extension:build": "pnpm --filter @tabsnap/chrome-extension build",
     "extension:dev": "pnpm --filter @tabsnap/chrome-extension dev",
     "format": "prettier --write .",
