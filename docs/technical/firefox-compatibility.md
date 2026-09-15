@@ -6,24 +6,24 @@ The `.tabsnap` schema, validation, serialization, compression, encryption and co
 
 ## Capability matrix
 
-| Capability | Chromium | Firefox 139+ | TabSnap behavior |
-| --- | --- | --- | --- |
-| Tab URL, title, order | Supported | Supported | Shared snapshot fields |
-| Pinned tabs | Supported | Supported | Shared restore engine |
-| Active tab | Supported | Supported | Shared restore engine |
-| Multiple normal windows | Supported | Supported | Shared restore engine |
-| Window bounds | Supported | Supported | Preserve best-effort geometry |
-| Window state | normal / minimized / maximized / fullscreen | Same core states; API also defines `docked` | Firefox normalizes `docked` to `normal` |
-| Focused window | Supported | Supported | Shared snapshot field |
-| Tab-group membership | Supported | Supported | Browser IDs become snapshot-local IDs |
-| Group title | Supported | Supported | Shared snapshot field |
-| Group color | 9 shared colors | Same 9 colors | Shared snapshot field |
-| Group collapsed state | Supported | Supported | Preserve state; accept native UI differences |
-| Group IDs across restart | Ephemeral | Ephemeral | Never persist raw browser IDs |
-| Private windows | User opt-in | User-controlled “Run in Private Windows” | Never bypass browser policy |
-| Local companion | Optional loopback permission | Optional loopback permission | Same authenticated protocol |
-| Extension background | MV3 service worker | MV3 background script/event page | Separate manifests |
-| Store metadata | Chromium manifest | Gecko ID + AMO declaration | Separate Firefox package |
+| Capability               | Chromium                                    | Firefox 139+                                | TabSnap behavior                             |
+| ------------------------ | ------------------------------------------- | ------------------------------------------- | -------------------------------------------- |
+| Tab URL, title, order    | Supported                                   | Supported                                   | Shared snapshot fields                       |
+| Pinned tabs              | Supported                                   | Supported                                   | Shared restore engine                        |
+| Active tab               | Supported                                   | Supported                                   | Shared restore engine                        |
+| Multiple normal windows  | Supported                                   | Supported                                   | Shared restore engine                        |
+| Window bounds            | Supported                                   | Supported                                   | Preserve best-effort geometry                |
+| Window state             | normal / minimized / maximized / fullscreen | Same core states; API also defines `docked` | Firefox normalizes `docked` to `normal`      |
+| Focused window           | Supported                                   | Supported                                   | Shared snapshot field                        |
+| Tab-group membership     | Supported                                   | Supported                                   | Browser IDs become snapshot-local IDs        |
+| Group title              | Supported                                   | Supported                                   | Shared snapshot field                        |
+| Group color              | 9 shared colors                             | Same 9 colors                               | Shared snapshot field                        |
+| Group collapsed state    | Supported                                   | Supported                                   | Preserve state; accept native UI differences |
+| Group IDs across restart | Ephemeral                                   | Ephemeral                                   | Never persist raw browser IDs                |
+| Private windows          | User opt-in                                 | User-controlled “Run in Private Windows”    | Never bypass browser policy                  |
+| Local companion          | Optional loopback permission                | Optional loopback permission                | Same authenticated protocol                  |
+| Extension background     | MV3 service worker                          | MV3 background script/event page            | Separate manifests                           |
+| Store metadata           | Chromium manifest                           | Gecko ID + AMO declaration                  | Separate Firefox package                     |
 
 ## Adapter architecture
 
