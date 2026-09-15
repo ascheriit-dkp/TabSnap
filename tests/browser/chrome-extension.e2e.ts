@@ -172,7 +172,7 @@ async function inspectWorkspace(
   );
 }
 
-test('captures and restores a real Chrome workspace non-destructively', async () => {
+test('encrypts, imports and restores a real Chrome workspace non-destructively', async () => {
   const server = createServer((request, response) => {
     response.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
@@ -195,6 +195,10 @@ test('captures and restores a real Chrome workspace non-destructively', async ()
     const extensionPage = await openExtensionPage(context);
     await expect(extensionPage.locator('h1')).toHaveText('TabSnap');
     await expect(extensionPage.locator('.local-badge')).toHaveText('No backend');
+
+    const manifest = await extensionPage.evaluate(() => chrome.runtime.getManifest());
+    expect(manifest.action?.default_popup).toBeUndefined();
+    expect(manifest.background?.service_worker).toBe('background.js');
 
     const granted = await extensionPage.evaluate(
       () =>
@@ -272,6 +276,29 @@ test('captures and restores a real Chrome workspace non-destructively', async ()
     );
     await expect(extensionPage.locator('#preview')).toContainText(
       'Captured: 2 windows, 3 tabs, 1 group',
+    );
+
+    const password = 'beta-password-123';
+    await extensionPage.locator('#password').fill(password);
+    await extensionPage.locator('#export-string').click();
+    await expect(extensionPage.locator('#status')).toContainText('Encrypted string created');
+
+    const encryptedString = await extensionPage.locator('#output-string').inputValue();
+    expect(encryptedString.startsWith('tabsnap:v1:')).toBe(true);
+    expect(encryptedString.length).toBeGreaterThan('tabsnap:v1:'.length + 64);
+
+    await extensionPage.locator('#input-string').fill(encryptedString);
+    await extensionPage.locator('#password').fill('wrong-password-123');
+    await extensionPage.locator('#import-string').click();
+    await expect(extensionPage.locator('#status')).toHaveText('Unable to decrypt snapshot.');
+
+    await extensionPage.locator('#password').fill(password);
+    await extensionPage.locator('#import-string').click();
+    await expect(extensionPage.locator('#status')).toHaveText(
+      'Encrypted string validated and decrypted locally. Review the preview before restore.',
+    );
+    await expect(extensionPage.locator('#preview')).toContainText(
+      'Imported: 2 windows, 3 tabs, 1 group',
     );
 
     await extensionPage.locator('#restore').click();
