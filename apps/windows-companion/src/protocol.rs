@@ -635,6 +635,7 @@ fn fill_random(_bytes: &mut [u8]) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::process;
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
