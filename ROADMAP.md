@@ -43,6 +43,53 @@
 
 Portable Windows companion.
 
+### M16 — portable foundation
+
+- native Windows executable
+- no installer, service or administrator requirement
+- derive portable storage from the executable directory
+- Windows CI build and tests
+
+### M17 — storage policy
+
+- portable, local and custom storage modes
+- removable-drive hints without assuming every USB device reports as removable
+- writable-path validation and clear errors
+
+### M18 — snapshot library
+
+- safe `.tabsnap` file discovery
+- import/copy/export operations
+- atomic writes and collision-safe names
+- opaque encrypted files remain encrypted at rest
+
+### M19 — local companion protocol
+
+- versioned localhost protocol
+- explicit session authentication
+- loopback-only binding
+- no Internet-facing listener
+
+### M20 — Chrome bridge
+
+- opt-in extension connection to the local companion
+- send and receive encrypted snapshots
+- preserve extension-only operation when the companion is absent
+
+### M21 — companion UI
+
+- native snapshot library view
+- storage-mode controls
+- import/export and copy paths
+- clear connection and privacy state
+
+### M22 — Level 2 hardening
+
+- Windows integration tests
+- portable ZIP + checksum
+- threat-model update
+- alpha/beta release of the companion
+
 ## M23-M28 — Level 3
 
 Edge, then Firefox.
