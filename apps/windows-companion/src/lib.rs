@@ -222,7 +222,10 @@ fn parse_storage_config(contents: &str) -> io::Result<StorageMode> {
 
     for line in contents.lines().filter(|line| !line.trim().is_empty()) {
         let (key, value) = line.split_once('=').ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "Invalid storage configuration line.")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid storage configuration line.",
+            )
         })?;
 
         match key {
@@ -275,7 +278,7 @@ fn serialize_storage_config(mode: &StorageMode) -> io::Result<String> {
 
     if let StorageMode::Custom(path) = mode {
         let value = path.to_string_lossy();
-        if value.contains(['\n', '\r']) {
+        if value.contains('\n') || value.contains('\r') {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Custom storage path contains an unsupported line break.",
@@ -358,7 +361,8 @@ mod tests {
     #[test]
     fn defaults_to_portable_when_config_is_absent() {
         let root = temp_root("default");
-        let layout = PortableLayout::from_executable_path(root.join("tabsnap-companion.exe")).unwrap();
+        let layout =
+            PortableLayout::from_executable_path(root.join("tabsnap-companion.exe")).unwrap();
 
         assert_eq!(load_storage_mode(&layout).unwrap(), StorageMode::Portable);
     }
@@ -382,7 +386,8 @@ mod tests {
     fn resolves_local_storage_under_local_app_data() {
         let root = temp_root("local-root");
         let local = temp_root("local-app-data");
-        let layout = PortableLayout::from_executable_path(root.join("tabsnap-companion.exe")).unwrap();
+        let layout =
+            PortableLayout::from_executable_path(root.join("tabsnap-companion.exe")).unwrap();
         let resolved =
             resolve_storage_with_local_base(&layout, &StorageMode::Local, Some(&local)).unwrap();
 
@@ -395,7 +400,8 @@ mod tests {
     #[test]
     fn rejects_relative_custom_storage() {
         let root = temp_root("relative");
-        let layout = PortableLayout::from_executable_path(root.join("tabsnap-companion.exe")).unwrap();
+        let layout =
+            PortableLayout::from_executable_path(root.join("tabsnap-companion.exe")).unwrap();
         let error = resolve_storage_with_local_base(
             &layout,
             &StorageMode::Custom(PathBuf::from("relative-library")),
@@ -422,7 +428,8 @@ mod tests {
         let root = temp_root("activate-root");
         fs::create_dir_all(&root).unwrap();
         let custom = temp_root("activate-custom");
-        let layout = PortableLayout::from_executable_path(root.join("tabsnap-companion.exe")).unwrap();
+        let layout =
+            PortableLayout::from_executable_path(root.join("tabsnap-companion.exe")).unwrap();
         let mode = StorageMode::Custom(custom.clone());
 
         let resolved = activate_storage(&layout, mode.clone()).unwrap();
