@@ -439,10 +439,12 @@ mod tests {
 
         assert_eq!(entry.path.parent(), Some(root.as_path()));
         assert!(entry.file_name.ends_with(".tabsnap"));
-        assert!(!entry
-            .file_name
-            .chars()
-            .any(|character| matches!(character, '/' | '\\' | ':' | '<' | '>' | '*')));
+        assert!(
+            !entry
+                .file_name
+                .chars()
+                .any(|character| matches!(character, '/' | '\\' | ':' | '<' | '>' | '*'))
+        );
 
         fs::remove_dir_all(root).unwrap();
     }
