@@ -7,6 +7,7 @@ Thumbs.db
 !.env.example
 coverage/
 **/dist/
+**/target/
 **/.vitepress/cache/
 **/.vitepress/dist/
 playwright-report/
