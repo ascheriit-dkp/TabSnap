@@ -9,16 +9,19 @@ import {
   type WindowState,
 } from '@tabsnap/schema';
 
+import { detectChromiumRuntime } from './chromium-runtime.js';
+
 const BLOCKED_RESTORE_PROTOCOLS = new Set([
   'blob:',
   'chrome-extension:',
   'data:',
   'devtools:',
+  'edge-extension:',
   'filesystem:',
   'javascript:',
 ]);
 
-const CHROME_GROUP_COLORS = new Set([
+const CHROMIUM_GROUP_COLORS = new Set([
   'grey',
   'blue',
   'red',
@@ -37,7 +40,7 @@ export interface RestoreReport {
   warnings: string[];
 }
 
-function platformFromChrome(os: chrome.runtime.PlatformInfo['os']): Platform {
+function platformFromChromium(os: chrome.runtime.PlatformInfo['os']): Platform {
   switch (os) {
     case 'win':
       return 'windows';
@@ -89,18 +92,14 @@ function tabUrl(tab: chrome.tabs.Tab): string {
   return tab.url ?? tab.pendingUrl ?? 'about:blank';
 }
 
-function browserVersion(): string | undefined {
-  return /(?:Chrome|Chromium)\/([0-9.]+)/u.exec(navigator.userAgent)?.[1];
-}
-
 async function captureWindow(
   window: chrome.windows.Window,
   order: number,
 ): Promise<WindowSnapshot> {
-  if (window.id === undefined) throw new Error('Chrome returned a window without an ID.');
+  if (window.id === undefined) throw new Error('Chromium API returned a window without an ID.');
 
   const tabs = [...(window.tabs ?? [])].sort((left, right) => left.index - right.index);
-  if (tabs.length === 0) throw new Error('Chrome returned an empty normal window.');
+  if (tabs.length === 0) throw new Error('Chromium API returned an empty normal window.');
 
   const groupPositions = new Map<number, number>();
   tabs.forEach((tab, tabOrder) => {
@@ -155,22 +154,23 @@ async function captureWindow(
 }
 
 export async function captureWorkspace(): Promise<TabSnapSnapshot> {
+  const runtime = detectChromiumRuntime(navigator.userAgent);
   const [windows, platformInfo] = await Promise.all([
     chrome.windows.getAll({ populate: true, windowTypes: ['normal'] }),
     chrome.runtime.getPlatformInfo(),
   ]);
 
-  if (windows.length === 0) throw new Error('No normal Chrome windows are available to capture.');
-
-  const version = browserVersion();
+  if (windows.length === 0) {
+    throw new Error(`No normal ${runtime.displayName} windows are available to capture.`);
+  }
   const snapshot: TabSnapSnapshot = {
     format: 'tabsnap',
     formatVersion: 1,
     createdAt: new Date().toISOString(),
     source: {
-      browser: 'chrome',
-      platform: platformFromChrome(platformInfo.os),
-      ...(version !== undefined ? { browserVersion: version } : {}),
+      browser: runtime.browser,
+      platform: platformFromChromium(platformInfo.os),
+      ...(runtime.version !== undefined ? { browserVersion: runtime.version } : {}),
     },
     windows: await Promise.all(windows.map((window, order) => captureWindow(window, order))),
   };
@@ -189,8 +189,8 @@ export function isAttemptableRestoreUrl(value: string): boolean {
   return !BLOCKED_RESTORE_PROTOCOLS.has(url.protocol);
 }
 
-function chromeGroupColor(value: string | undefined): chrome.tabGroups.Color | undefined {
-  if (value === undefined || !CHROME_GROUP_COLORS.has(value)) return undefined;
+function chromiumGroupColor(value: string | undefined): chrome.tabGroups.Color | undefined {
+  if (value === undefined || !CHROMIUM_GROUP_COLORS.has(value)) return undefined;
   return value as chrome.tabGroups.Color;
 }
 
@@ -243,13 +243,13 @@ async function restoreWindow(
         pinned: false,
       });
 
-      if (createdTab.id === undefined) throw new Error('Chrome returned a tab without an ID.');
+      if (createdTab.id === undefined) throw new Error('Chromium API returned a tab without an ID.');
       createdTabIdsByOrder.set(tab.order, createdTab.id);
       report.createdTabs += 1;
     } catch (error) {
       report.skippedTabs += 1;
       report.warnings.push(
-        `Skipped ${tab.url}: ${error instanceof Error ? error.message : 'Chrome rejected the tab.'}`,
+        `Skipped ${tab.url}: ${error instanceof Error ? error.message : 'browser rejected the tab.'}`,
       );
     }
   }
@@ -276,7 +276,7 @@ async function restoreWindow(
 
     try {
       const groupId = await groupTabs([firstTabId, ...remainingTabIds], windowId);
-      const color = chromeGroupColor(group.color);
+      const color = chromiumGroupColor(group.color);
       await chrome.tabGroups.update(groupId, {
         collapsed: group.collapsed,
         ...(group.title !== undefined ? { title: group.title } : {}),
