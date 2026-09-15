@@ -71,6 +71,39 @@ jobs:
             tabsnap-edge-ci-*.zip.sha256
           if-no-files-found: error
 
+  firefox-package:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm extension:build
+      - run: pnpm extension:firefox-build
+      - run: pnpm extension:firefox-audit
+      - run: pnpm extension:firefox-lint
+      - name: Package Firefox extension
+        run: |
+          ARCHIVE="tabsnap-firefox-ci-${GITHUB_SHA}.zip"
+          cd apps/chrome-extension/dist-firefox
+          find . -type f -exec touch -t 198001010000 {} +
+          find . -type f -print0 | sort -z | xargs -0 zip -X "$GITHUB_WORKSPACE/$ARCHIVE"
+          cd "$GITHUB_WORKSPACE"
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tabsnap-firefox-package
+          path: |
+            tabsnap-firefox-ci-*.zip
+            tabsnap-firefox-ci-*.zip.sha256
+          if-no-files-found: error
+
   windows-companion:
     runs-on: windows-latest
     steps:
