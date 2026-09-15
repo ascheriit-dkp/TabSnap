@@ -247,7 +247,7 @@ fn safe_snapshot_name(suggested_name: &str) -> String {
         .split('.')
         .next()
         .unwrap_or_default()
-        .trim_end_matches(|character: char| character == ' ' || character == '.');
+        .trim_end_matches([' ', '.']);
     if is_windows_reserved_name(reserved_candidate) {
         stem.insert(0, '_');
     }
