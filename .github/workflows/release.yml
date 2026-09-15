@@ -16,7 +16,7 @@ jobs:
       (github.event_name == 'create' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release-trigger/'))
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
@@ -67,7 +67,7 @@ jobs:
       (github.event_name == 'create' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release-trigger/'))
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
