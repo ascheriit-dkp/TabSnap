@@ -28,6 +28,16 @@ async function walk(directory) {
   return files;
 }
 
+function rejectMatch(contents, displayPath, name, pattern) {
+  const match = pattern.exec(contents);
+  if (match === null) return;
+
+  const start = Math.max(0, match.index - 120);
+  const end = Math.min(contents.length, match.index + match[0].length + 180);
+  const context = contents.slice(start, end).replaceAll('\n', ' ');
+  fail(`${displayPath} contains ${name} near ${JSON.stringify(context)}.`);
+}
+
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 assert(manifest.manifest_version === 3, 'manifest_version must be 3.');
 
@@ -60,41 +70,34 @@ assert(
 );
 
 const textExtensions = new Set(['.css', '.html', '.js', '.json']);
+const remoteResourceExtensions = new Set(['.css', '.html', '.json']);
 const networkPatterns = [
-  { name: 'absolute HTTP(S) URL', pattern: /https?:\/\//u },
   { name: 'fetch()', pattern: /\bfetch\s*\(/u },
   { name: 'XMLHttpRequest', pattern: /\bXMLHttpRequest\b/u },
   { name: 'WebSocket', pattern: /\bWebSocket\b/u },
   { name: 'EventSource', pattern: /\bEventSource\b/u },
   { name: 'sendBeacon', pattern: /\bsendBeacon\b/u },
+  { name: 'importScripts()', pattern: /\bimportScripts\s*\(/u },
 ];
-
-function stripKnownInertParserUrls(contents, extension) {
-  if (extension !== '.js') return contents;
-
-  // Zod validates IPv6 strings by parsing a synthetic `http://[IPv6]` URL locally.
-  // This exact expression is inert: it is passed only to the URL constructor, not a network API.
-  return contents.replace(/new URL\(`http:\/\/\[\$\{[^}]+\}\]`\)/gu, '');
-}
 
 for (const file of await walk(dist)) {
   const extension = extname(file);
   if (!textExtensions.has(extension) || file.endsWith('.map')) continue;
 
-  const contents = stripKnownInertParserUrls(await readFile(file, 'utf8'), extension);
+  const contents = await readFile(file, 'utf8');
   const displayPath = relative(root, file);
 
-  for (const { name, pattern } of networkPatterns) {
-    const match = pattern.exec(contents);
-    if (match === null) continue;
+  if (remoteResourceExtensions.has(extension)) {
+    rejectMatch(contents, displayPath, 'absolute HTTP(S) resource URL', /https?:\/\//u);
+  }
 
-    const start = Math.max(0, match.index - 120);
-    const end = Math.min(contents.length, match.index + match[0].length + 180);
-    const context = contents.slice(start, end).replaceAll('\n', ' ');
-    fail(`${displayPath} contains ${name} near ${JSON.stringify(context)}.`);
+  if (extension === '.js') {
+    for (const { name, pattern } of networkPatterns) {
+      rejectMatch(contents, displayPath, name, pattern);
+    }
   }
 }
 
 process.stdout.write(
-  'Extension audit passed: minimal permissions, no host access, no static network path.\n',
+  'Extension audit passed: minimal permissions, no remote resource references, no JavaScript network primitives.\n',
 );
