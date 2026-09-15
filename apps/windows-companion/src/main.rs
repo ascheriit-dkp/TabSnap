@@ -1,4 +1,5 @@
 pub mod library;
+pub mod protocol;
 
 use std::env;
 use std::error::Error;
@@ -6,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use library::SnapshotLibrary;
+use protocol::ProtocolServer;
 use tabsnap_companion::{
     PortableLayout, ResolvedStorage, StorageMode, activate_storage, load_storage_mode,
     resolve_storage, validate_storage_dir,
@@ -17,6 +19,7 @@ fn print_help() {
     println!("Usage:");
     println!("  tabsnap-companion info");
     println!("  tabsnap-companion init");
+    println!("  tabsnap-companion serve");
     println!("  tabsnap-companion storage show");
     println!("  tabsnap-companion storage set portable");
     println!("  tabsnap-companion storage set local");
@@ -104,6 +107,22 @@ fn run_library_command(layout: &PortableLayout, args: &[String]) -> Result<(), B
     Ok(())
 }
 
+fn serve(layout: &PortableLayout) -> Result<(), Box<dyn Error>> {
+    let library = snapshot_library(layout)?;
+    validate_storage_dir(library.root())?;
+    let server = ProtocolServer::bind(library)?;
+
+    println!("TabSnap Companion protocol v1");
+    println!("endpoint: {}", server.endpoint()?);
+    println!("pairing-code: {}", server.pairing_code()?);
+    println!("binding: IPv4 loopback only");
+    println!("session: ephemeral; pairing token is not written to disk");
+    println!("Press Ctrl+C or close this window to stop the companion protocol.");
+
+    server.serve_forever()?;
+    Ok(())
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     let command = args.get(1).map(String::as_str).unwrap_or("info");
@@ -118,6 +137,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             println!("Storage initialized and writable.");
             print_storage(&layout, &storage);
         }
+        "serve" => serve(&layout)?,
         "storage" => match args.get(2).map(String::as_str) {
             Some("show") => {
                 let mode = load_storage_mode(&layout)?;
