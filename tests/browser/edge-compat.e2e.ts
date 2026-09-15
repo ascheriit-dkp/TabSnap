@@ -188,10 +188,23 @@ test('detects Edge metadata and connects to the local companion in the shared Ch
       .fill(`tabsnap-companion:v1:${companionPort}:${SESSION_TOKEN}`);
     await extensionPage.locator('#companion-connect').click();
 
-    await expect(extensionPage.locator('#companion-state')).toHaveText('Connected');
-    await expect(extensionPage.locator('#status')).toContainText(
-      'Portable companion connected for this page session.',
-    );
+    await expect
+      .poll(
+        () =>
+          extensionPage.evaluate(async () => {
+            const state = document.getElementById('companion-state')?.textContent ?? '';
+            const status = document.getElementById('status')?.textContent ?? '';
+            const permissions = await new Promise<chrome.permissions.Permissions>(
+              (resolvePermissions) => chrome.permissions.getAll(resolvePermissions),
+            );
+            return { state, status, origins: permissions.origins ?? [] };
+          }),
+        { timeout: 5_000 },
+      )
+      .toMatchObject({
+        state: 'Connected',
+        status: expect.stringContaining('Portable companion connected for this page session.'),
+      });
     await expect(extensionPage.locator('#companion-snapshots')).toHaveText('Library is empty');
 
     const granted = await extensionPage.evaluate(
