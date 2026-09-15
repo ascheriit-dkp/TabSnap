@@ -177,6 +177,15 @@ function formatBytes(bytes: number): string {
   return `${(kib / 1024).toFixed(1)} MiB`;
 }
 
+async function hasCompanionOriginPermission(): Promise<boolean> {
+  const requiredOrigins = chrome.runtime.getManifest().host_permissions ?? [];
+  if (requiredOrigins.includes(COMPANION_ORIGIN_PERMISSION)) return true;
+
+  return new Promise((resolvePermission) => {
+    chrome.permissions.contains({ origins: [COMPANION_ORIGIN_PERMISSION] }, resolvePermission);
+  });
+}
+
 async function run(action: string, operation: () => Promise<void>): Promise<void> {
   if (busy) return;
   busy = true;
@@ -286,7 +295,10 @@ restoreButton.addEventListener('click', () => {
 companionConnectButton.addEventListener('click', () => {
   void run('Connecting to portable companion', async () => {
     const pairing = parseCompanionPairingCode(companionPairing.value);
-    const granted = await chrome.permissions.request({ origins: [COMPANION_ORIGIN_PERMISSION] });
+    const alreadyGranted = await hasCompanionOriginPermission();
+    const granted =
+      alreadyGranted ||
+      (await chrome.permissions.request({ origins: [COMPANION_ORIGIN_PERMISSION] }));
     if (!granted) throw new Error('Loopback permission was not granted. Companion mode stays off.');
 
     const client = new CompanionClient(pairing);

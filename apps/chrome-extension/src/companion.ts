@@ -73,7 +73,7 @@ export class CompanionClient {
 
     this.endpoint = pairing.endpoint;
     this.#token = pairing.token;
-    this.#fetch = options.fetchImpl ?? fetch;
+    this.#fetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
