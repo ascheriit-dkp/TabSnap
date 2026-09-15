@@ -6,25 +6,25 @@ Firefox 139 is the minimum because it is the first release with the full `tabGro
 
 ## Capability matrix
 
-| Capability | Chromium today | Firefox 139+ | M26 action |
-| --- | --- | --- | --- |
-| Tab URL, title, order | Supported with `tabs` | Supported with `tabs` | Shared snapshot fields |
-| Pinned tabs | Supported | Supported | Adapter-specific API calls |
-| Active tab | Supported | Supported | Shared semantics |
-| Multiple normal windows | Supported | Supported | Adapter-specific API calls |
-| Window bounds | Supported | Supported | Preserve best-effort geometry |
-| Window state | normal / minimized / maximized / fullscreen | Same core states; API also defines `docked` | Normalize unsupported `docked` to `normal` with a warning |
-| Focused window | Supported | Supported | Shared snapshot field |
-| Tab-group membership | Supported | Supported | Canonicalize browser group IDs |
-| Group title | Supported | Supported | Shared snapshot field |
-| Group color | 9 shared colors | Same 9 colors | Shared snapshot field |
-| Group collapsed state | Supported | Supported | Preserve state, accept browser-specific active-tab behavior |
-| Group IDs across restart | Ephemeral | Ephemeral; restored IDs may differ | Never persist raw browser IDs |
-| Private windows | User opt-in | User-controlled “Run in Private Windows” | Detect access; never silently claim capture |
-| Local companion | Optional `127.0.0.1` permission | `optional_host_permissions` supported in MV3 | Keep protocol and explicit Connect flow |
-| Extension background | MV3 service worker | MV3 background script/event page | Firefox-specific manifest |
-| API namespace | `chrome.*` today | `browser.*` preferred; `chrome.*` supported for porting | Put API access behind Firefox adapter boundary |
-| Store metadata | Chromium manifest | Gecko ID + AMO data-collection declaration | Firefox-specific manifest/package |
+| Capability               | Chromium today                              | Firefox 139+                                            | M26 action                                                  |
+| ------------------------ | ------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
+| Tab URL, title, order    | Supported with `tabs`                       | Supported with `tabs`                                   | Shared snapshot fields                                      |
+| Pinned tabs              | Supported                                   | Supported                                               | Adapter-specific API calls                                  |
+| Active tab               | Supported                                   | Supported                                               | Shared semantics                                            |
+| Multiple normal windows  | Supported                                   | Supported                                               | Adapter-specific API calls                                  |
+| Window bounds            | Supported                                   | Supported                                               | Preserve best-effort geometry                               |
+| Window state             | normal / minimized / maximized / fullscreen | Same core states; API also defines `docked`             | Normalize unsupported `docked` to `normal` with a warning   |
+| Focused window           | Supported                                   | Supported                                               | Shared snapshot field                                       |
+| Tab-group membership     | Supported                                   | Supported                                               | Canonicalize browser group IDs                              |
+| Group title              | Supported                                   | Supported                                               | Shared snapshot field                                       |
+| Group color              | 9 shared colors                             | Same 9 colors                                           | Shared snapshot field                                       |
+| Group collapsed state    | Supported                                   | Supported                                               | Preserve state, accept browser-specific active-tab behavior |
+| Group IDs across restart | Ephemeral                                   | Ephemeral; restored IDs may differ                      | Never persist raw browser IDs                               |
+| Private windows          | User opt-in                                 | User-controlled “Run in Private Windows”                | Detect access; never silently claim capture                 |
+| Local companion          | Optional `127.0.0.1` permission             | `optional_host_permissions` supported in MV3            | Keep protocol and explicit Connect flow                     |
+| Extension background     | MV3 service worker                          | MV3 background script/event page                        | Firefox-specific manifest                                   |
+| API namespace            | `chrome.*` today                            | `browser.*` preferred; `chrome.*` supported for porting | Put API access behind Firefox adapter boundary              |
+| Store metadata           | Chromium manifest                           | Gecko ID + AMO data-collection declaration              | Firefox-specific manifest/package                           |
 
 ## Restore URL policy
 
