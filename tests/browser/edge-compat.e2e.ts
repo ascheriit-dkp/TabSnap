@@ -148,7 +148,9 @@ test('detects Edge metadata and connects to the local companion in the shared Ch
       .poll(() =>
         extensionPage.evaluate(async (url) => {
           const tabs = await chrome.tabs.query({});
-          return tabs.some((tab) => (tab.url ?? tab.pendingUrl) === url && tab.status === 'complete');
+          return tabs.some(
+            (tab) => (tab.url ?? tab.pendingUrl) === url && tab.status === 'complete',
+          );
         }, fixtureUrl),
       )
       .toBe(true);
@@ -157,9 +159,7 @@ test('detects Edge metadata and connects to the local companion in the shared Ch
     await expect(extensionPage.locator('#status')).toHaveText(
       'Workspace captured locally. Nothing has been uploaded.',
     );
-    await expect(extensionPage.locator('#preview')).toContainText(
-      'Source: edge 140.0.3485.54',
-    );
+    await expect(extensionPage.locator('#preview')).toContainText('Source: edge 140.0.3485.54');
 
     await extensionPage
       .locator('#companion-pairing')
