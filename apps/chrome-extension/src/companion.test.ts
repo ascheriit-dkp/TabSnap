@@ -38,7 +38,7 @@ describe('parseCompanionPairingCode', () => {
 
 describe('CompanionClient', () => {
   it('authenticates status requests and validates protocol version', async () => {
-    const fetchImpl = vi.fn(async () =>
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       jsonResponse({
         protocolVersion: 1,
         transport: 'loopback-http',
