@@ -178,6 +178,9 @@ function formatBytes(bytes: number): string {
 }
 
 async function hasCompanionOriginPermission(): Promise<boolean> {
+  const requiredOrigins = chrome.runtime.getManifest().host_permissions ?? [];
+  if (requiredOrigins.includes(COMPANION_ORIGIN_PERMISSION)) return true;
+
   return new Promise((resolvePermission) => {
     chrome.permissions.contains({ origins: [COMPANION_ORIGIN_PERMISSION] }, resolvePermission);
   });
