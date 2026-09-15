@@ -2,7 +2,7 @@ use std::io;
 
 #[cfg(windows)]
 mod windows_ui {
-    use std::ffi::{c_void, OsStr};
+    use std::ffi::{OsStr, c_void};
     use std::fs;
     use std::io;
     use std::mem::{size_of, zeroed};
@@ -283,7 +283,11 @@ mod windows_ui {
     fn choose_file(parent: Hwnd, save: bool) -> Option<PathBuf> {
         let mut buffer = vec![0_u16; 32_768];
         let filter = wide("TabSnap snapshots (*.tabsnap)\0*.tabsnap\0All files (*.*)\0*.*\0");
-        let title = wide(if save { "Export encrypted snapshot" } else { "Import encrypted snapshot" });
+        let title = wide(if save {
+            "Export encrypted snapshot"
+        } else {
+            "Import encrypted snapshot"
+        });
         let extension = wide("tabsnap");
         let mut dialog: OpenFileNameW = unsafe { zeroed() };
         dialog.struct_size = size_of::<OpenFileNameW>() as Dword;
@@ -294,7 +298,12 @@ mod windows_ui {
         dialog.max_file = buffer.len() as Dword;
         dialog.title = title.as_ptr();
         dialog.default_extension = extension.as_ptr();
-        dialog.flags = OFN_PATHMUSTEXIST | if save { OFN_OVERWRITEPROMPT } else { OFN_FILEMUSTEXIST };
+        dialog.flags = OFN_PATHMUSTEXIST
+            | if save {
+                OFN_OVERWRITEPROMPT
+            } else {
+                OFN_FILEMUSTEXIST
+            };
 
         let ok = unsafe {
             if save {
@@ -306,7 +315,10 @@ mod windows_ui {
         if ok == 0 {
             return None;
         }
-        let end = buffer.iter().position(|value| *value == 0).unwrap_or(buffer.len());
+        let end = buffer
+            .iter()
+            .position(|value| *value == 0)
+            .unwrap_or(buffer.len());
         Some(PathBuf::from(String::from_utf16_lossy(&buffer[..end])))
     }
 
@@ -356,11 +368,19 @@ mod windows_ui {
             2 => {
                 let path = get_text(custom).trim().to_owned();
                 if path.is_empty() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "Custom storage path is empty."));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Custom storage path is empty.",
+                    ));
                 }
                 StorageMode::Custom(PathBuf::from(path))
             }
-            _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Select a storage mode.")),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Select a storage mode.",
+                ));
+            }
         };
 
         let storage = activate_storage(&layout, mode)?;
@@ -385,7 +405,11 @@ mod windows_ui {
         let library = {
             let state = STATE.get().expect("UI state initialized").lock().unwrap();
             if state.pairing_code.is_some() {
-                message(parent, "The companion protocol is already running.", "TabSnap");
+                message(
+                    parent,
+                    "The companion protocol is already running.",
+                    "TabSnap",
+                );
                 return Ok(());
             }
             state.library.clone()
@@ -429,7 +453,10 @@ mod windows_ui {
 
     fn export_snapshot(parent: Hwnd) -> io::Result<()> {
         let Some(entry) = selected_entry() else {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Select a snapshot first."));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Select a snapshot first.",
+            ));
         };
         let Some(chosen) = choose_file(parent, true) else {
             return Ok(());
@@ -439,7 +466,11 @@ mod windows_ui {
             let state = STATE.get().expect("UI state initialized").lock().unwrap();
             state.library.export_file(&entry.file_name, destination)?
         };
-        message(parent, &format!("Exported to {}", exported.display()), "TabSnap");
+        message(
+            parent,
+            &format!("Exported to {}", exported.display()),
+            "TabSnap",
+        );
         Ok(())
     }
 
@@ -457,7 +488,9 @@ mod windows_ui {
                     ID_IMPORT => import_snapshot(hwnd),
                     ID_EXPORT => export_snapshot(hwnd),
                     ID_COPY_PATH => selected_entry()
-                        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Select a snapshot first."))
+                        .ok_or_else(|| {
+                            io::Error::new(io::ErrorKind::InvalidInput, "Select a snapshot first.")
+                        })
                         .and_then(|entry| copy_clipboard(hwnd, &entry.path.display().to_string())),
                     ID_APPLY_STORAGE => apply_storage(hwnd),
                     ID_START_SERVER => start_server(hwnd),
@@ -467,7 +500,12 @@ mod windows_ui {
                             .and_then(|state| state.lock().ok())
                             .and_then(|state| state.pairing_code.clone());
                         pairing
-                            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Start the companion protocol first."))
+                            .ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    "Start the companion protocol first.",
+                                )
+                            })
                             .and_then(|value| copy_clipboard(hwnd, &value))
                     }
                     _ => Ok(()),
@@ -531,7 +569,17 @@ mod windows_ui {
             return Err(io::Error::last_os_error());
         }
 
-        child(hwnd, "STATIC", "Encrypted snapshot library", 0, 20, 18, 300, 22, 0)?;
+        child(
+            hwnd,
+            "STATIC",
+            "Encrypted snapshot library",
+            0,
+            20,
+            18,
+            300,
+            22,
+            0,
+        )?;
         let list = child(
             hwnd,
             "LISTBOX",
@@ -543,10 +591,26 @@ mod windows_ui {
             235,
             ID_LIST,
         )?;
-        child(hwnd, "BUTTON", "Refresh", WS_TABSTOP, 20, 292, 90, 30, ID_REFRESH)?;
-        child(hwnd, "BUTTON", "Import", WS_TABSTOP, 120, 292, 90, 30, ID_IMPORT)?;
-        child(hwnd, "BUTTON", "Export", WS_TABSTOP, 220, 292, 90, 30, ID_EXPORT)?;
-        child(hwnd, "BUTTON", "Copy path", WS_TABSTOP, 320, 292, 100, 30, ID_COPY_PATH)?;
+        child(
+            hwnd, "BUTTON", "Refresh", WS_TABSTOP, 20, 292, 90, 30, ID_REFRESH,
+        )?;
+        child(
+            hwnd, "BUTTON", "Import", WS_TABSTOP, 120, 292, 90, 30, ID_IMPORT,
+        )?;
+        child(
+            hwnd, "BUTTON", "Export", WS_TABSTOP, 220, 292, 90, 30, ID_EXPORT,
+        )?;
+        child(
+            hwnd,
+            "BUTTON",
+            "Copy path",
+            WS_TABSTOP,
+            320,
+            292,
+            100,
+            30,
+            ID_COPY_PATH,
+        )?;
 
         child(hwnd, "STATIC", "Storage", 0, 20, 340, 100, 22, 0)?;
         let storage_mode = child(
