@@ -4,15 +4,22 @@ on:
   push:
     tags:
       - 'v*'
+  create:
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'create' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release-trigger/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.25.0
@@ -20,34 +27,64 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+      - name: Resolve release tag
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "create" ]]; then
+            RELEASE_TAG="${{ github.event.ref }}"
+            RELEASE_TAG="${RELEASE_TAG#release-trigger/}"
+          else
+            RELEASE_TAG="$GITHUB_REF_NAME"
+          fi
+
+          if [[ "$RELEASE_TAG" != v* ]]; then
+            echo "Release tag must start with v: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
       - run: pnpm install --no-frozen-lockfile
       - name: Validate release version
         run: |
-          echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          node --input-type=module -e "import fs from 'node:fs'; const expected=process.env.GITHUB_REF_NAME.slice(1); const root=JSON.parse(fs.readFileSync('package.json','utf8')); const app=JSON.parse(fs.readFileSync('apps/chrome-extension/package.json','utf8')); const manifest=JSON.parse(fs.readFileSync('apps/chrome-extension/public/manifest.json','utf8')); if(root.version!==expected || app.version!==expected || manifest.version_name!==expected) throw new Error('Release tag does not match package/manifest version_name');"
+          node --input-type=module -e "import fs from 'node:fs'; const expected=process.env.RELEASE_VERSION; const root=JSON.parse(fs.readFileSync('package.json','utf8')); const app=JSON.parse(fs.readFileSync('apps/chrome-extension/package.json','utf8')); const manifest=JSON.parse(fs.readFileSync('apps/chrome-extension/public/manifest.json','utf8')); if(root.version!==expected || app.version!==expected || manifest.version_name!==expected) throw new Error('Release tag does not match package/manifest version_name');"
       - run: pnpm check
       - name: Package Chrome extension
         run: |
-          ARCHIVE="tabsnap-chrome-${GITHUB_REF_NAME}.zip"
+          ARCHIVE="tabsnap-chrome-${RELEASE_TAG}.zip"
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
           cd apps/chrome-extension/dist
           find . -type f -exec touch -t 198001010000 {} +
           find . -type f -print0 | sort -z | xargs -0 zip -X "$GITHUB_WORKSPACE/$ARCHIVE"
           cd "$GITHUB_WORKSPACE"
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+      - name: Create release tag
+        if: github.event_name == 'create'
+        run: |
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null; then
+            EXISTING_SHA="$(git rev-list -n 1 "$RELEASE_TAG")"
+            if [[ "$EXISTING_SHA" != "$GITHUB_SHA" ]]; then
+              echo "Tag $RELEASE_TAG already points to $EXISTING_SHA instead of $GITHUB_SHA" >&2
+              exit 1
+            fi
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag "$RELEASE_TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
       - name: Publish GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          NOTES="docs/releases/${RELEASE_TAG}.md"
           if [[ -f "$NOTES" ]]; then
-            gh release create "$GITHUB_REF_NAME" "$ARCHIVE" "$ARCHIVE.sha256" \
-              --title "TabSnap ${GITHUB_REF_NAME}" \
+            gh release create "$RELEASE_TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
+              --title "TabSnap ${RELEASE_TAG}" \
               --prerelease \
               --notes-file "$NOTES"
           else
-            gh release create "$GITHUB_REF_NAME" "$ARCHIVE" "$ARCHIVE.sha256" \
-              --title "TabSnap ${GITHUB_REF_NAME}" \
+            gh release create "$RELEASE_TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
+              --title "TabSnap ${RELEASE_TAG}" \
               --prerelease \
               --generate-notes
           fi
