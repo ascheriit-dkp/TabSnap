@@ -22,7 +22,12 @@ impl PortableLayout {
         let root_dir = executable_path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Executable has no parent directory."))?
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Executable has no parent directory.",
+                )
+            })?
             .to_path_buf();
         let snapshots_dir = root_dir.join(SNAPSHOTS_DIR_NAME);
 
