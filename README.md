@@ -17,9 +17,9 @@ Capture windows and tabs, encrypt the snapshot, move it yourself, restore it som
 
 ## Status
 
-The browser-agnostic snapshot, compression and encryption core is implemented. The Chrome Manifest V3 client is the current Level 1 target.
+`0.1.0-alpha.1` is the first Level 1 Chrome alpha. It captures, encrypts, exports, imports and restores browser workspaces locally.
 
-See the [roadmap](./ROADMAP.md) and [product spec](./docs/product-spec.md).
+The alpha is intended for manual testing before the beta milestone. See the [roadmap](./ROADMAP.md), [Chrome guide](./docs/guide/chrome-extension.md) and [product spec](./docs/product-spec.md).
 
 ## Development
 
