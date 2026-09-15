@@ -101,13 +101,23 @@ jobs:
       - run: pnpm check
       - name: Package Chrome extension
         run: |
-          ARCHIVE="tabsnap-chrome-${RELEASE_TAG}.zip"
-          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+          CHROME_ARCHIVE="tabsnap-chrome-${RELEASE_TAG}.zip"
+          echo "CHROME_ARCHIVE=$CHROME_ARCHIVE" >> "$GITHUB_ENV"
           cd apps/chrome-extension/dist
           find . -type f -exec touch -t 198001010000 {} +
-          find . -type f -print0 | sort -z | xargs -0 zip -X "$GITHUB_WORKSPACE/$ARCHIVE"
+          find . -type f -print0 | sort -z | xargs -0 zip -X "$GITHUB_WORKSPACE/$CHROME_ARCHIVE"
           cd "$GITHUB_WORKSPACE"
-          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          sha256sum "$CHROME_ARCHIVE" > "$CHROME_ARCHIVE.sha256"
+      - name: Package Microsoft Edge extension
+        run: |
+          pnpm extension:edge-audit
+          EDGE_ARCHIVE="tabsnap-edge-${RELEASE_TAG}.zip"
+          echo "EDGE_ARCHIVE=$EDGE_ARCHIVE" >> "$GITHUB_ENV"
+          cd apps/chrome-extension/dist
+          find . -type f -exec touch -t 198001010000 {} +
+          find . -type f -print0 | sort -z | xargs -0 zip -X "$GITHUB_WORKSPACE/$EDGE_ARCHIVE"
+          cd "$GITHUB_WORKSPACE"
+          sha256sum "$EDGE_ARCHIVE" > "$EDGE_ARCHIVE.sha256"
       - uses: actions/download-artifact@v5
         with:
           name: tabsnap-companion-release
@@ -139,7 +149,14 @@ jobs:
             exit 1
           fi
 
-          ASSETS=("$ARCHIVE" "$ARCHIVE.sha256" "$COMPANION_ARCHIVE" "$COMPANION_CHECKSUM")
+          ASSETS=(
+            "$CHROME_ARCHIVE"
+            "$CHROME_ARCHIVE.sha256"
+            "$EDGE_ARCHIVE"
+            "$EDGE_ARCHIVE.sha256"
+            "$COMPANION_ARCHIVE"
+            "$COMPANION_CHECKSUM"
+          )
           if [[ -f "$NOTES" ]]; then
             gh release create "$RELEASE_TAG" "${ASSETS[@]}" \
               --title "TabSnap ${RELEASE_TAG}" \
