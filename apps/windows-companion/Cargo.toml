@@ -1,0 +1,16 @@
+[package]
+name = "tabsnap-companion"
+version = "0.2.0-dev.1"
+edition = "2024"
+rust-version = "1.85"
+description = "Portable Windows companion for TabSnap"
+license = "MIT"
+publish = false
+
+[lib]
+name = "tabsnap_companion"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tabsnap-companion"
+path = "src/main.rs"
