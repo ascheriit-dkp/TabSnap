@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
