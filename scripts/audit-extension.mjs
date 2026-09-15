@@ -58,6 +58,12 @@ for (const key of [
   assert(!(key in manifest), `${key} must not be present.`);
 }
 
+assert(manifest.action?.default_popup === undefined, 'the toolbar action must not use an ephemeral popup.');
+assert(
+  manifest.background?.service_worker === 'background.js',
+  'background.service_worker must be background.js.',
+);
+
 const csp = manifest.content_security_policy?.extension_pages;
 assert(typeof csp === 'string', 'extension_pages CSP is required.');
 assert(
@@ -99,5 +105,5 @@ for (const file of await walk(dist)) {
 }
 
 process.stdout.write(
-  'Extension audit passed: minimal permissions, no remote resource references, no JavaScript network primitives.\n',
+  'Extension audit passed: minimal permissions, persistent page launcher, no remote resource references, no JavaScript network primitives.\n',
 );
