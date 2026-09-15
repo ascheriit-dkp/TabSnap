@@ -1,6 +1,8 @@
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { type AddressInfo } from 'node:net';
-import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test';
 
@@ -85,6 +87,23 @@ function json(response: ServerResponse, request: IncomingMessage, value: unknown
   response.end(JSON.stringify(value));
 }
 
+async function stageEdgeExtensionWithPregrantedLoopback(): Promise<{
+  root: string;
+  extensionPath: string;
+}> {
+  const root = await mkdtemp(join(tmpdir(), 'tabsnap-edge-e2e-'));
+  const extensionPath = join(root, 'extension');
+  await cp(resolve('apps/chrome-extension/dist'), extensionPath, { recursive: true });
+
+  const manifestPath = join(extensionPath, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+  manifest.host_permissions = ['http://127.0.0.1/*'];
+  delete manifest.optional_host_permissions;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  return { root, extensionPath };
+}
+
 function companionServer(): Server {
   return createServer((request, response) => {
     if (request.method === 'OPTIONS') {
@@ -127,13 +146,16 @@ test('detects Edge metadata and connects to the local companion in the shared Ch
   const fixturePort = await listen(fixtureServer);
   const companionPort = await listen(companion);
   const fixtureUrl = `http://127.0.0.1:${fixturePort}/edge`;
-  const extensionPath = resolve('apps/chrome-extension/dist');
+  const stagedExtension = await stageEdgeExtensionWithPregrantedLoopback();
 
   const context = await chromium.launchPersistentContext('', {
     channel: 'chromium',
     headless: true,
     userAgent: EDGE_USER_AGENT,
-    args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
+    args: [
+      `--disable-extensions-except=${stagedExtension.extensionPath}`,
+      `--load-extension=${stagedExtension.extensionPath}`,
+    ],
   });
 
   try {
@@ -183,5 +205,6 @@ test('detects Edge metadata and connects to the local companion in the shared Ch
     await context.close();
     await closeServer(companion);
     await closeServer(fixtureServer);
+    await rm(stagedExtension.root, { recursive: true, force: true });
   }
 });
