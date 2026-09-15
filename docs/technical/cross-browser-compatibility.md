@@ -8,12 +8,12 @@ Before restore, the extension compares the snapshot source with the current brow
 
 ## Compatibility matrix
 
-| Source | Target | Common web tabs | Windows/order/pins | Groups | Browser-internal URLs |
-| --- | --- | --- | --- | --- | --- |
-| Chrome | Edge | Yes | Yes | Yes | Best effort |
-| Edge | Chrome | Yes | Yes | Yes | Best effort |
-| Chrome / Edge | Firefox | Yes | Yes | Yes | Best effort; some are known unsupported |
-| Firefox | Chrome / Edge | Yes | Yes | Yes | Best effort; Firefox-only URLs can be skipped |
+| Source        | Target        | Common web tabs | Windows/order/pins | Groups | Browser-internal URLs                         |
+| ------------- | ------------- | --------------- | ------------------ | ------ | --------------------------------------------- |
+| Chrome        | Edge          | Yes             | Yes                | Yes    | Best effort                                   |
+| Edge          | Chrome        | Yes             | Yes                | Yes    | Best effort                                   |
+| Chrome / Edge | Firefox       | Yes             | Yes                | Yes    | Best effort; some are known unsupported       |
+| Firefox       | Chrome / Edge | Yes             | Yes                | Yes    | Best effort; Firefox-only URLs can be skipped |
 
 ## What stays portable
 

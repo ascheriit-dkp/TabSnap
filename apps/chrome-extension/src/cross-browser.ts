@@ -32,7 +32,8 @@ function isKnownNonPortableUrl(value: string, source: Browser, target: Browser):
 
   if (source === 'firefox') {
     if (urlProtocol === 'moz-extension:' || urlProtocol === 'resource:') return true;
-    if (urlProtocol === 'about:' && value !== 'about:blank' && value !== 'about:newtab') return true;
+    if (urlProtocol === 'about:' && value !== 'about:blank' && value !== 'about:newtab')
+      return true;
   }
 
   return false;
@@ -60,7 +61,9 @@ export function assessCrossBrowserCompatibility(
   const notes: string[] = [];
 
   if ((source === 'chrome' && target === 'edge') || (source === 'edge' && target === 'chrome')) {
-    notes.push('Chrome and Edge share the same workspace model; browser-internal URLs are best effort.');
+    notes.push(
+      'Chrome and Edge share the same workspace model; browser-internal URLs are best effort.',
+    );
   } else {
     notes.push(
       'Common web tabs, ordering, pinning, groups and window geometry are portable; browser-privileged URLs are best effort.',
