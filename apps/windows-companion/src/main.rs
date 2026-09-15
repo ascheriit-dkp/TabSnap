@@ -66,10 +66,7 @@ fn snapshot_library(layout: &PortableLayout) -> Result<SnapshotLibrary, Box<dyn 
     Ok(SnapshotLibrary::new(storage.snapshots_dir))
 }
 
-fn run_library_command(
-    layout: &PortableLayout,
-    args: &[String],
-) -> Result<(), Box<dyn Error>> {
+fn run_library_command(layout: &PortableLayout, args: &[String]) -> Result<(), Box<dyn Error>> {
     let library = snapshot_library(layout)?;
 
     match args.get(2).map(String::as_str) {
