@@ -243,7 +243,8 @@ async function restoreWindow(
         pinned: false,
       });
 
-      if (createdTab.id === undefined) throw new Error('Chromium API returned a tab without an ID.');
+      if (createdTab.id === undefined)
+        throw new Error('Chromium API returned a tab without an ID.');
       createdTabIdsByOrder.set(tab.order, createdTab.id);
       report.createdTabs += 1;
     } catch (error) {
