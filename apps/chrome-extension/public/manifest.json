@@ -6,6 +6,7 @@
   "description": "Move a browser workspace between machines without a backend.",
   "minimum_chrome_version": "120",
   "permissions": ["tabs", "tabGroups"],
+  "optional_host_permissions": ["http://127.0.0.1/*"],
   "action": {
     "default_title": "Open TabSnap"
   },
