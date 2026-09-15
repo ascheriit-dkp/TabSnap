@@ -39,20 +39,23 @@ The audit recursively examines executable/text assets in `apps/chrome-extension/
 
 It rejects:
 
-- absolute `http://` or `https://` URLs
-- `fetch()`
+- absolute `http://` or `https://` resource references in HTML, CSS and JSON assets
+- `fetch()` in executable JavaScript
 - `XMLHttpRequest`
 - `WebSocket`
 - `EventSource`
 - `sendBeacon`
+- `importScripts()`
+
+JavaScript dependencies may contain inert URL strings that are never requested. For example, Zod includes JSON Schema identifier URIs and constructs a synthetic `http://[IPv6]` URL locally when validating IPv6 syntax. The audit therefore targets network-capable JavaScript APIs rather than rejecting every URL-looking string inside bundled code.
 
 Source maps are excluded because they are non-executable debug metadata and can legitimately contain upstream source comments or URLs.
 
-This check deliberately runs on the final artifact rather than only grepping source files: a dependency or bundler transform that introduced a network path would still be caught.
+This check deliberately runs on the final artifact rather than only grepping source files: a dependency or bundler transform that introduced a network-capable path would still be caught by these invariants.
 
 ## Limits of the audit
 
-Static matching is defense in depth, not a proof of non-communication. JavaScript can synthesize identifiers and URLs dynamically.
+Static matching is defense in depth, not a proof of non-communication. JavaScript can synthesize identifiers and URLs dynamically or use an API the matcher does not yet know about.
 
 For that reason Level 1 also relies on:
 
