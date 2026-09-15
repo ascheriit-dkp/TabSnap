@@ -9,7 +9,8 @@ describe('restore URL filtering', () => {
     'file:///C:/Users/example/notes.html',
     'about:blank',
     'chrome://newtab/',
-  ])('allows Chrome to attempt %s', (url) => {
+    'edge://newtab/',
+  ])('allows Chromium to attempt %s', (url) => {
     expect(isAttemptableRestoreUrl(url)).toBe(true);
   });
 
@@ -18,6 +19,7 @@ describe('restore URL filtering', () => {
     'data:text/html,hello',
     'blob:https://example.com/id',
     'chrome-extension://abc/page.html',
+    'edge-extension://abc/page.html',
     'devtools://devtools/bundled/inspector.html',
     'not a url',
   ])('blocks %s', (url) => {
