@@ -58,7 +58,10 @@ for (const key of [
   assert(!(key in manifest), `${key} must not be present.`);
 }
 
-assert(manifest.action?.default_popup === undefined, 'the toolbar action must not use an ephemeral popup.');
+assert(
+  manifest.action?.default_popup === undefined,
+  'the toolbar action must not use an ephemeral popup.',
+);
 assert(
   manifest.background?.service_worker === 'background.js',
   'background.service_worker must be background.js.',
