@@ -7,6 +7,11 @@ import {
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 
 import { captureWorkspace, restoreWorkspace } from './browser.js';
+import {
+  CompanionClient,
+  COMPANION_ORIGIN_PERMISSION,
+  parseCompanionPairingCode,
+} from './companion.js';
 import './style.css';
 
 const MAX_FILE_BYTES = 65 * 1024 * 1024;
@@ -29,12 +34,25 @@ const inputString = element<HTMLTextAreaElement>('input-string');
 const inputFile = element<HTMLInputElement>('input-file');
 const preview = element<HTMLDivElement>('preview');
 const status = element<HTMLPreElement>('status');
+const companionState = element<HTMLSpanElement>('companion-state');
+const companionPairing = element<HTMLInputElement>('companion-pairing');
+const companionConnectButton = element<HTMLButtonElement>('companion-connect');
+const companionDisconnectButton = element<HTMLButtonElement>('companion-disconnect');
+const companionRefreshButton = element<HTMLButtonElement>('companion-refresh');
+const companionName = element<HTMLInputElement>('companion-name');
+const companionSendButton = element<HTMLButtonElement>('companion-send');
+const companionSnapshots = element<HTMLSelectElement>('companion-snapshots');
+const companionLoadButton = element<HTMLButtonElement>('companion-load');
 
 let currentSnapshot: TabSnapSnapshot | undefined;
+let companionClient: CompanionClient | undefined;
 let busy = false;
 
 function syncButtons(): void {
   const hasSnapshot = currentSnapshot !== undefined;
+  const connected = companionClient !== undefined;
+  const hasCompanionSelection = connected && companionSnapshots.value.length > 0;
+
   captureButton.disabled = busy;
   exportStringButton.disabled = busy || !hasSnapshot;
   exportFileButton.disabled = busy || !hasSnapshot;
@@ -42,6 +60,18 @@ function syncButtons(): void {
   inputFile.disabled = busy;
   restoreButton.disabled = busy || !hasSnapshot;
   copyStringButton.disabled = busy || outputString.value.length === 0;
+
+  companionPairing.disabled = busy || connected;
+  companionConnectButton.disabled = busy || connected;
+  companionDisconnectButton.disabled = busy || !connected;
+  companionRefreshButton.disabled = busy || !connected;
+  companionName.disabled = busy || !connected;
+  companionSendButton.disabled = busy || !connected || !hasSnapshot;
+  companionSnapshots.disabled = busy || !connected;
+  companionLoadButton.disabled = busy || !hasCompanionSelection;
+
+  companionState.textContent = connected ? 'Connected' : 'Disconnected';
+  companionState.dataset.connected = connected ? 'true' : 'false';
 }
 
 function setStatus(message: string, kind: 'info' | 'success' | 'error' = 'info'): void {
@@ -83,18 +113,68 @@ function bytesBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
+function defaultSnapshotName(snapshot: TabSnapSnapshot): string {
+  const stamp = new Date(snapshot.createdAt).toISOString().replaceAll(':', '-');
+  return `tabsnap-${stamp}`;
+}
+
 function downloadSnapshot(bytes: Uint8Array, snapshot: TabSnapSnapshot): void {
   const blob = new Blob([bytesBuffer(bytes)], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
-  const stamp = new Date(snapshot.createdAt).toISOString().replaceAll(':', '-');
   anchor.href = url;
-  anchor.download = `tabsnap-${stamp}.tabsnap`;
+  anchor.download = `${defaultSnapshotName(snapshot)}.tabsnap`;
   anchor.style.display = 'none';
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function requireCompanion(): CompanionClient {
+  if (companionClient === undefined) throw new Error('Connect the portable companion first.');
+  return companionClient;
+}
+
+async function refreshCompanionLibrary(client: CompanionClient): Promise<void> {
+  const previous = companionSnapshots.value;
+  const entries = await client.listSnapshots();
+  companionSnapshots.replaceChildren();
+
+  if (entries.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Library is empty';
+    companionSnapshots.append(option);
+  } else {
+    for (const entry of entries) {
+      const option = document.createElement('option');
+      option.value = entry.name;
+      option.textContent = `${entry.name} (${formatBytes(entry.size)})`;
+      companionSnapshots.append(option);
+    }
+    const previousOption = Array.from(companionSnapshots.options).find(
+      (option) => option.value === previous,
+    );
+    if (previousOption !== undefined) companionSnapshots.value = previousOption.value;
+  }
+
+  syncButtons();
+}
+
+function clearCompanionLibrary(): void {
+  companionSnapshots.replaceChildren();
+  const option = document.createElement('option');
+  option.value = '';
+  option.textContent = 'No snapshots loaded';
+  companionSnapshots.append(option);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kib = bytes / 1024;
+  if (kib < 1024) return `${kib.toFixed(1)} KiB`;
+  return `${(kib / 1024).toFixed(1)} MiB`;
 }
 
 async function run(action: string, operation: () => Promise<void>): Promise<void> {
@@ -203,4 +283,80 @@ restoreButton.addEventListener('click', () => {
   });
 });
 
+companionConnectButton.addEventListener('click', () => {
+  void run('Connecting to portable companion', async () => {
+    const pairing = parseCompanionPairingCode(companionPairing.value);
+    const granted = await chrome.permissions.request({ origins: [COMPANION_ORIGIN_PERMISSION] });
+    if (!granted) throw new Error('Loopback permission was not granted. Companion mode stays off.');
+
+    const client = new CompanionClient(pairing);
+    const companionStatus = await client.status();
+    if (
+      companionStatus.transport !== 'loopback-http' ||
+      companionStatus.authentication !== 'session-bearer'
+    ) {
+      throw new Error('Connected process is not a compatible TabSnap companion.');
+    }
+
+    companionClient = client;
+    companionPairing.value = '';
+    await refreshCompanionLibrary(client);
+    setStatus(
+      'Portable companion connected for this page session. The pairing token is kept in memory only.',
+      'success',
+    );
+  });
+});
+
+companionDisconnectButton.addEventListener('click', () => {
+  companionClient = undefined;
+  companionPairing.value = '';
+  clearCompanionLibrary();
+  syncButtons();
+  setStatus('Portable companion disconnected. Extension-only mode remains available.', 'success');
+});
+
+companionRefreshButton.addEventListener('click', () => {
+  void run('Refreshing companion library', async () => {
+    await refreshCompanionLibrary(requireCompanion());
+    setStatus('Companion library refreshed.', 'success');
+  });
+});
+
+companionSnapshots.addEventListener('change', syncButtons);
+
+companionSendButton.addEventListener('click', () => {
+  void run('Encrypting and saving to companion', async () => {
+    if (currentSnapshot === undefined) throw new Error('Capture or import a snapshot first.');
+    const client = requireCompanion();
+    const encrypted = await encryptSnapshot(currentSnapshot, password());
+    const requestedName = companionName.value.trim() || defaultSnapshotName(currentSnapshot);
+    const entry = await client.storeSnapshot(requestedName, encrypted);
+    companionName.value = '';
+    await refreshCompanionLibrary(client);
+    companionSnapshots.value = entry.name;
+    syncButtons();
+    setStatus(
+      `Saved ${entry.name} to the local companion as encrypted bytes. The password never left this extension.`,
+      'success',
+    );
+  });
+});
+
+companionLoadButton.addEventListener('click', () => {
+  void run('Loading encrypted snapshot from companion', async () => {
+    const client = requireCompanion();
+    const selected = companionSnapshots.value;
+    if (selected.length === 0) throw new Error('Choose a companion snapshot first.');
+    const encrypted = await client.loadSnapshot(selected);
+    const snapshot = await decryptSnapshot(encrypted, password());
+    showSnapshot(snapshot, `Companion ${selected}`);
+    setStatus(
+      'Encrypted snapshot loaded from the local companion and decrypted inside the extension. Review the preview before restore.',
+      'success',
+    );
+  });
+});
+
+clearCompanionLibrary();
 syncButtons();
