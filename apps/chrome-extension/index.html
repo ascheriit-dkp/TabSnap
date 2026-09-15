@@ -70,9 +70,14 @@
         <div class="section-heading">
           <div>
             <h2>Portable companion <span class="optional-label">optional</span></h2>
-            <p>Keep encrypted snapshots in the local Windows companion. Extension-only mode still works without it.</p>
+            <p>
+              Keep encrypted snapshots in the local Windows companion. Extension-only mode still
+              works without it.
+            </p>
           </div>
-          <span id="companion-state" class="connection-badge" data-connected="false">Disconnected</span>
+          <span id="companion-state" class="connection-badge" data-connected="false">
+            Disconnected
+          </span>
         </div>
 
         <label>
@@ -85,11 +90,18 @@
             placeholder="tabsnap-companion:v1:port:token"
           />
         </label>
-        <p class="hint">Start <code>tabsnap-companion serve</code>, paste its one-session pairing code, then connect. The token is kept only in this page's memory.</p>
+        <p class="hint">
+          Start <code>tabsnap-companion serve</code>, paste its one-session pairing code, then
+          connect. The token is kept only in this page's memory.
+        </p>
         <div class="button-row">
           <button id="companion-connect" type="button">Connect</button>
-          <button id="companion-disconnect" type="button" class="secondary" disabled>Disconnect</button>
-          <button id="companion-refresh" type="button" class="secondary" disabled>Refresh library</button>
+          <button id="companion-disconnect" type="button" class="secondary" disabled>
+            Disconnect
+          </button>
+          <button id="companion-refresh" type="button" class="secondary" disabled>
+            Refresh library
+          </button>
         </div>
 
         <div class="companion-actions">
