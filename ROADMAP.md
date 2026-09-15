@@ -94,6 +94,44 @@ Portable Windows companion.
 
 Edge, then Firefox.
 
+### M23 — Chromium generalization
+
+- separate Chromium runtime detection from capture/restore logic
+- record Chrome and Edge source metadata correctly
+- keep one shared Chromium implementation
+- cover browser-specific internal URL handling
+
+### M24 — Edge support
+
+- Edge build/package
+- capture/restore compatibility tests
+- companion bridge verification
+- Edge release artifact
+
+### M25 — Firefox compatibility spike
+
+- tabs/windows/groups capability matrix
+- permissions and manifest differences
+- restore behavior and unsupported features
+
+### M26 — Firefox adapter
+
+- implement Firefox-specific capture/restore behind the adapter boundary
+- keep schema, crypto and companion protocol shared
+
+### M27 — cross-browser compatibility
+
+- Chrome ↔ Edge restore
+- Chromium ↔ Firefox best-effort restore
+- document feature-loss rules
+
+### M28 — extension stores
+
+- Chrome Web Store
+- Microsoft Edge Add-ons
+- Firefox Add-ons
+- release/privacy/permission documentation
+
 ## M29-M34 — Level 4
 
 Whole-machine multi-browser capture and restore.
