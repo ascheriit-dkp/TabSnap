@@ -57,8 +57,17 @@ jobs:
         run: cargo test --manifest-path apps/windows-companion/Cargo.toml --locked
       - name: Build portable executable
         run: cargo build --manifest-path apps/windows-companion/Cargo.toml --locked --release
+      - name: Smoke-test portable executable
+        shell: pwsh
+        run: ./scripts/test-windows-companion.ps1
+      - name: Package portable companion
+        shell: pwsh
+        run: ./scripts/package-windows-companion.ps1 -Version "ci-$env:GITHUB_SHA" -OutputDirectory "$env:GITHUB_WORKSPACE\dist"
       - uses: actions/upload-artifact@v4
         with:
           name: tabsnap-companion-windows-x64
-          path: apps/windows-companion/target/release/tabsnap-companion.exe
+          path: |
+            apps/windows-companion/target/release/tabsnap-companion.exe
+            dist/tabsnap-companion-windows-x64-*.zip
+            dist/tabsnap-companion-windows-x64-*.zip.sha256
           if-no-files-found: error
