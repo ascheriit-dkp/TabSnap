@@ -17,9 +17,11 @@ Capture windows and tabs, encrypt the snapshot, move it yourself, restore it som
 
 ## Status
 
-`0.1.0-alpha.1` is the first Level 1 Chrome alpha. It captures, encrypts, exports, imports and restores browser workspaces locally.
+`0.1.0-beta.1` is the Level 1 Chrome beta. It captures, encrypts, exports, imports and restores browser workspaces locally.
 
-The alpha is intended for manual testing before the beta milestone. See the [roadmap](./ROADMAP.md), [Chrome guide](./docs/guide/chrome-extension.md) and [product spec](./docs/product-spec.md).
+Clicking the TabSnap toolbar action opens a persistent extension page, so capture, Argon2id encryption, decryption and restore are no longer tied to the lifetime of a browser popup.
+
+See the [roadmap](./ROADMAP.md), [Chrome guide](./docs/guide/chrome-extension.md) and [product spec](./docs/product-spec.md).
 
 ## Development
 
