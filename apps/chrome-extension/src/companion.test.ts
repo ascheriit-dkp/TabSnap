@@ -37,6 +37,34 @@ describe('parseCompanionPairingCode', () => {
 });
 
 describe('CompanionClient', () => {
+  it('binds the default browser fetch to globalThis', async () => {
+    const fetchImpl = vi.fn(function (
+      this: unknown,
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> {
+      expect(this).toBe(globalThis);
+      expect(input).toBe('http://127.0.0.1:43123/v1/status');
+      expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${TOKEN}`);
+      return Promise.resolve(
+        jsonResponse({
+          protocolVersion: 1,
+          transport: 'loopback-http',
+          authentication: 'session-bearer',
+        }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchImpl);
+
+    try {
+      const client = new CompanionClient(parseCompanionPairingCode(PAIRING));
+      await expect(client.status()).resolves.toMatchObject({ protocolVersion: 1 });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('authenticates status requests and validates protocol version', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(input).toBe('http://127.0.0.1:43123/v1/status');
