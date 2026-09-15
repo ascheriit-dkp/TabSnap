@@ -208,7 +208,7 @@ export class CompanionClient {
       return response;
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error('Companion request timed out.');
+        throw new Error('Companion request timed out.', { cause: error });
       }
       throw error;
     } finally {
