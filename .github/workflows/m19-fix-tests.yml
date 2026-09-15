@@ -1,0 +1,47 @@
+name: M19 temporary test import fix
+
+on:
+  push:
+    branches:
+      - feat/windows-local-protocol
+    paths:
+      - .github/workflows/m19-fix-tests.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/windows-local-protocol
+      - name: Install Rust formatting toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt
+      - name: Import std process in protocol tests
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("apps/windows-companion/src/protocol.rs")
+          text = path.read_text()
+          old = "    use std::fs;\n    use std::thread;\n"
+          new = "    use std::fs;\n    use std::process;\n    use std::thread;\n"
+          if old not in text:
+              raise SystemExit("expected protocol test import block not found")
+          path.write_text(text.replace(old, new, 1))
+      - name: Apply rustfmt
+        run: cargo fmt --manifest-path apps/windows-companion/Cargo.toml
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/windows-companion/src/protocol.rs
+          git commit -m "fix: import process in M19 protocol tests"
+          git push origin HEAD:feat/windows-local-protocol
