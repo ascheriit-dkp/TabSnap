@@ -38,13 +38,18 @@ describe('parseCompanionPairingCode', () => {
 
 describe('CompanionClient', () => {
   it('authenticates status requests and validates protocol version', async () => {
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      jsonResponse({
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(input).toBe('http://127.0.0.1:43123/v1/status');
+      expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${TOKEN}`);
+      expect(init?.credentials).toBe('omit');
+      expect(init?.redirect).toBe('error');
+      expect(init?.cache).toBe('no-store');
+      return jsonResponse({
         protocolVersion: 1,
         transport: 'loopback-http',
         authentication: 'session-bearer',
-      }),
-    );
+      });
+    });
     const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
 
     await expect(client.status()).resolves.toEqual({
@@ -52,13 +57,7 @@ describe('CompanionClient', () => {
       transport: 'loopback-http',
       authentication: 'session-bearer',
     });
-
-    const [url, init] = fetchImpl.mock.calls[0] ?? [];
-    expect(url).toBe('http://127.0.0.1:43123/v1/status');
-    expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${TOKEN}`);
-    expect(init?.credentials).toBe('omit');
-    expect(init?.redirect).toBe('error');
-    expect(init?.cache).toBe('no-store');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an incompatible status version', async () => {
