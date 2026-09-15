@@ -4,7 +4,9 @@ import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const dist = join(root, 'apps/chrome-extension/dist');
+const extensionRoot = join(root, 'apps/chrome-extension');
+const extensionSource = join(extensionRoot, 'src');
+const dist = join(extensionRoot, 'dist');
 const manifestPath = join(dist, 'manifest.json');
 const companionOriginPermission = 'http://127.0.0.1/*';
 
@@ -84,8 +86,6 @@ assert(
   'CSP must not enable remote network/script sources.',
 );
 
-const textExtensions = new Set(['.css', '.html', '.js', '.json']);
-const remoteResourceExtensions = new Set(['.css', '.html', '.json']);
 const forbiddenNetworkPatterns = [
   { name: 'XMLHttpRequest', pattern: /\bXMLHttpRequest\b/u },
   { name: 'WebSocket', pattern: /\bWebSocket\b/u },
@@ -93,6 +93,24 @@ const forbiddenNetworkPatterns = [
   { name: 'sendBeacon', pattern: /\bsendBeacon\b/u },
   { name: 'importScripts()', pattern: /\bimportScripts\s*\(/u },
 ];
+
+// Audit TabSnap's production source for actual destinations before dependencies are bundled in.
+// Tests deliberately contain hostile/non-loopback examples and are excluded here.
+for (const file of await walk(extensionSource)) {
+  if (extname(file) !== '.ts' || file.endsWith('.test.ts')) continue;
+
+  const contents = await readFile(file, 'utf8');
+  const displayPath = relative(root, file);
+  rejectMatch(
+    contents,
+    displayPath,
+    'non-loopback absolute HTTP(S) URL',
+    /https?:\/\/(?!127\.0\.0\.1(?::|\/))/u,
+  );
+}
+
+const textExtensions = new Set(['.css', '.html', '.js', '.json']);
+const remoteResourceExtensions = new Set(['.css', '.html', '.json']);
 
 for (const file of await walk(dist)) {
   const extension = extname(file);
@@ -114,15 +132,6 @@ for (const file of await walk(dist)) {
       assert(
         contents.includes('http://127.0.0.1:'),
         `${displayPath} uses fetch without the fixed IPv4 loopback endpoint.`,
-      );
-
-      // Packaged validators such as Zod may construct `http://[${value}]` only to parse
-      // IPv6 syntax with the URL class. That string is not a network destination or fetch target.
-      rejectMatch(
-        contents,
-        displayPath,
-        'non-loopback absolute HTTP(S) URL',
-        /https?:\/\/(?!127\.0\.0\.1:|\[)/u,
       );
     }
   }
