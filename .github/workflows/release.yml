@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: pnpm install --no-frozen-lockfile
+      - name: Validate release version
+        run: |
+          echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          node --input-type=module -e "import fs from 'node:fs'; const expected=process.env.GITHUB_REF_NAME.slice(1); const root=JSON.parse(fs.readFileSync('package.json','utf8')); const app=JSON.parse(fs.readFileSync('apps/chrome-extension/package.json','utf8')); const manifest=JSON.parse(fs.readFileSync('apps/chrome-extension/public/manifest.json','utf8')); if(root.version!==expected || app.version!==expected || manifest.version_name!==expected) throw new Error('Release tag does not match package/manifest version_name');"
+      - run: pnpm check
+      - name: Package Chrome extension
+        run: |
+          ARCHIVE="tabsnap-chrome-${GITHUB_REF_NAME}.zip"
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+          cd apps/chrome-extension/dist
+          find . -type f -exec touch -t 198001010000 {} +
+          find . -type f -print0 | sort -z | xargs -0 zip -X "$GITHUB_WORKSPACE/$ARCHIVE"
+          cd "$GITHUB_WORKSPACE"
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          if [[ -f "$NOTES" ]]; then
+            gh release create "$GITHUB_REF_NAME" "$ARCHIVE" "$ARCHIVE.sha256" \
+              --title "TabSnap ${GITHUB_REF_NAME}" \
+              --prerelease \
+              --notes-file "$NOTES"
+          else
+            gh release create "$GITHUB_REF_NAME" "$ARCHIVE" "$ARCHIVE.sha256" \
+              --title "TabSnap ${GITHUB_REF_NAME}" \
+              --prerelease \
+              --generate-notes
+          fi

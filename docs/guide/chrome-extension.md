@@ -2,7 +2,15 @@
 
 The Level 1 client is a Manifest V3 Chrome extension.
 
-## Build
+## Install an alpha release
+
+Download the Chrome ZIP from the matching GitHub prerelease and verify its published `.sha256` file if you want to check the artifact before installing it.
+
+Extract the ZIP, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, then select the extracted directory containing `manifest.json`.
+
+Alpha builds are for manual testing and are not published to the Chrome Web Store yet.
+
+## Build from source
 
 ```bash
 pnpm install
