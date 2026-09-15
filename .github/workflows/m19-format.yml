@@ -1,0 +1,53 @@
+name: M19 temporary rustfmt
+
+on:
+  push:
+    branches:
+      - feat/windows-local-protocol
+    paths:
+      - .github/workflows/m19-format.yml
+      - apps/windows-companion/src/protocol.rs
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/windows-local-protocol
+      - name: Install Rust formatting toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt
+      - name: Make Unix RNG import target-specific
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("apps/windows-companion/src/protocol.rs")
+          text = path.read_text()
+          text = text.replace(
+              "use std::fs::File;\n",
+              "#[cfg(unix)]\nuse std::fs::File;\n",
+              1,
+          )
+          path.write_text(text)
+      - name: Apply rustfmt
+        run: cargo fmt --manifest-path apps/windows-companion/Cargo.toml
+      - name: Commit formatting result
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/windows-companion/src/protocol.rs
+          if git diff --cached --quiet; then
+            echo "No formatting changes required."
+            exit 0
+          fi
+          git commit -m "style: format M19 local protocol"
+          git push origin HEAD:feat/windows-local-protocol
