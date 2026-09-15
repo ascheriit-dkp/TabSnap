@@ -1,0 +1,36 @@
+name: M25 format
+
+on:
+  push:
+    branches:
+      - feat/firefox-compatibility-spike
+    paths:
+      - .github/workflows/m25-format.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/firefox-compatibility-spike
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm exec prettier --write docs/technical/firefox-compatibility.md scripts/audit-firefox-spike.mjs
+      - name: Commit formatting
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/technical/firefox-compatibility.md scripts/audit-firefox-spike.mjs
+          git commit -m "style: format Firefox compatibility spike"
+          git push origin HEAD:feat/firefox-compatibility-spike
