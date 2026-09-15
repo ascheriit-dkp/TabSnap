@@ -63,7 +63,11 @@ describe('CompanionClient', () => {
 
   it('rejects an incompatible status version', async () => {
     const fetchImpl = vi.fn(async () =>
-      jsonResponse({ protocolVersion: 2, transport: 'loopback-http', authentication: 'session-bearer' }),
+      jsonResponse({
+        protocolVersion: 2,
+        transport: 'loopback-http',
+        authentication: 'session-bearer',
+      }),
     );
     const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
 
@@ -100,7 +104,9 @@ describe('CompanionClient', () => {
     });
     const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
 
-    await expect(client.storeSnapshot('Work Session', new Uint8Array([0, 1, 2, 255]))).resolves.toEqual({
+    await expect(
+      client.storeSnapshot('Work Session', new Uint8Array([0, 1, 2, 255])),
+    ).resolves.toEqual({
       name: 'Work Session.tabsnap',
       size: 4,
     });
@@ -124,14 +130,15 @@ describe('CompanionClient', () => {
   });
 
   it('rejects oversized advertised snapshots before reading the body', async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(new Uint8Array([1]), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'Content-Length': String(MAX_COMPANION_SNAPSHOT_BYTES + 1),
-        },
-      }),
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1]), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': String(MAX_COMPANION_SNAPSHOT_BYTES + 1),
+          },
+        }),
     );
     const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
 
