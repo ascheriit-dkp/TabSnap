@@ -3,7 +3,6 @@ use std::io;
 #[cfg(windows)]
 mod windows_ui {
     use std::ffi::{OsStr, c_void};
-    use std::fs;
     use std::io;
     use std::mem::{size_of, zeroed};
     use std::os::windows::ffi::OsStrExt;
@@ -195,6 +194,7 @@ mod windows_ui {
         OsStr::new(value).encode_wide().chain(Some(0)).collect()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn child(
         parent: Hwnd,
         class: &str,
@@ -516,10 +516,10 @@ mod windows_ui {
                 0
             }
             WM_DESTROY => {
-                PostQuitMessage(0);
+                unsafe { PostQuitMessage(0) };
                 0
             }
-            _ => DefWindowProcW(hwnd, message_id, w_param, l_param),
+            _ => unsafe { DefWindowProcW(hwnd, message_id, w_param, l_param) },
         }
     }
 
