@@ -32,6 +32,7 @@ export default defineConfig({
         items: [
           { text: '.tabsnap format', link: '/technical/tabsnap-format' },
           { text: 'Firefox compatibility', link: '/technical/firefox-compatibility' },
+          { text: 'Cross-browser compatibility', link: '/technical/cross-browser-compatibility' },
         ],
       },
       {
