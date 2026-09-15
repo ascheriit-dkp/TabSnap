@@ -1,10 +1,7 @@
 import type { WindowState } from '@tabsnap/schema';
 
 import { detectChromiumRuntime } from './chromium-runtime.js';
-import {
-  createWebExtensionAdapter,
-  type RestoreUrlDecision,
-} from './webextension-adapter.js';
+import { createWebExtensionAdapter, type RestoreUrlDecision } from './webextension-adapter.js';
 
 const BLOCKED_RESTORE_PROTOCOLS = new Set([
   'blob:',

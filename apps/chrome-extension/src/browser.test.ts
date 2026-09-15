@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  normalizeChromiumWindowState,
-  resolveChromiumRestoreUrl,
-} from './chromium-adapter.js';
-import {
-  normalizeFirefoxWindowState,
-  resolveFirefoxRestoreUrl,
-} from './firefox-adapter.js';
+import { normalizeChromiumWindowState, resolveChromiumRestoreUrl } from './chromium-adapter.js';
+import { normalizeFirefoxWindowState, resolveFirefoxRestoreUrl } from './firefox-adapter.js';
 
 describe('Chromium restore URL filtering', () => {
   it.each([

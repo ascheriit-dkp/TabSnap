@@ -232,7 +232,8 @@ export function createWebExtensionAdapter(config: BrowserAdapterConfig): Browser
           pinned: false,
         });
 
-        if (createdTab.id === undefined) throw new Error('Browser API returned a tab without an ID.');
+        if (createdTab.id === undefined)
+          throw new Error('Browser API returned a tab without an ID.');
         createdTabIdsByOrder.set(tab.order, createdTab.id);
         report.createdTabs += 1;
       } catch (error) {
@@ -301,7 +302,9 @@ export function createWebExtensionAdapter(config: BrowserAdapterConfig): Browser
 
     const requestedActive = tabs.find((tab) => tab.active);
     const activeTabId =
-      (requestedActive === undefined ? undefined : createdTabIdsByOrder.get(requestedActive.order)) ??
+      (requestedActive === undefined
+        ? undefined
+        : createdTabIdsByOrder.get(requestedActive.order)) ??
       createdTabIdsByOrder.values().next().value;
 
     if (activeTabId !== undefined) {

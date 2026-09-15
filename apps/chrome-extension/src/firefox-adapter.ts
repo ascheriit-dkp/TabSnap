@@ -1,10 +1,7 @@
 import type { WindowState } from '@tabsnap/schema';
 
 import { detectFirefoxRuntime } from './firefox-runtime.js';
-import {
-  createWebExtensionAdapter,
-  type RestoreUrlDecision,
-} from './webextension-adapter.js';
+import { createWebExtensionAdapter, type RestoreUrlDecision } from './webextension-adapter.js';
 
 const BLOCKED_FIREFOX_PROTOCOLS = new Set([
   'blob:',

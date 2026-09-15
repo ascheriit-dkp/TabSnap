@@ -40,7 +40,10 @@ for (const key of [
   assert(!(key in manifest), `${key} must not be present.`);
 }
 
-assert(manifest.background?.service_worker === undefined, 'background.service_worker must be absent.');
+assert(
+  manifest.background?.service_worker === undefined,
+  'background.service_worker must be absent.',
+);
 assert(
   sameStrings(manifest.background?.scripts, ['background.js']),
   'background.scripts must contain only background.js.',
