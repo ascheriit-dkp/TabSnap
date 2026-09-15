@@ -66,6 +66,51 @@
         <button id="restore" type="button" disabled>Restore as new windows</button>
       </section>
 
+      <section class="panel companion-panel">
+        <div class="section-heading">
+          <div>
+            <h2>Portable companion <span class="optional-label">optional</span></h2>
+            <p>Keep encrypted snapshots in the local Windows companion. Extension-only mode still works without it.</p>
+          </div>
+          <span id="companion-state" class="connection-badge" data-connected="false">Disconnected</span>
+        </div>
+
+        <label>
+          Pairing code
+          <input
+            id="companion-pairing"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="tabsnap-companion:v1:port:token"
+          />
+        </label>
+        <p class="hint">Start <code>tabsnap-companion serve</code>, paste its one-session pairing code, then connect. The token is kept only in this page's memory.</p>
+        <div class="button-row">
+          <button id="companion-connect" type="button">Connect</button>
+          <button id="companion-disconnect" type="button" class="secondary" disabled>Disconnect</button>
+          <button id="companion-refresh" type="button" class="secondary" disabled>Refresh library</button>
+        </div>
+
+        <div class="companion-actions">
+          <label>
+            Name for current workspace
+            <input id="companion-name" type="text" maxlength="80" placeholder="work-session" />
+          </label>
+          <button id="companion-send" type="button" disabled>Encrypt & save to companion</button>
+
+          <label>
+            Companion library
+            <select id="companion-snapshots" disabled>
+              <option value="">No snapshots loaded</option>
+            </select>
+          </label>
+          <button id="companion-load" type="button" class="secondary" disabled>
+            Load & decrypt selected
+          </button>
+        </div>
+      </section>
+
       <pre id="status" class="status" aria-live="polite">Ready.</pre>
     </main>
     <script type="module" src="/src/main.ts"></script>
