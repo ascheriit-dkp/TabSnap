@@ -1,83 +1,88 @@
-# Firefox compatibility spike
+# Firefox compatibility
 
-Target for the first Firefox implementation: **Firefox Desktop 139+**.
+TabSnap targets **Firefox Desktop 139+**. Firefox 139 is the minimum because it is the first release with the full `tabGroups` WebExtension API.
 
-Firefox 139 is the minimum because it is the first release with the full `tabGroups` WebExtension API. The `.tabsnap` schema, crypto, compression and companion protocol do not need a Firefox-specific fork.
+The `.tabsnap` schema, validation, serialization, compression, encryption and companion protocol are shared with Chrome and Edge. Firefox-specific behavior is isolated behind the Firefox adapter and its own Manifest V3 package.
 
 ## Capability matrix
 
-| Capability               | Chromium today                              | Firefox 139+                                            | M26 action                                                  |
-| ------------------------ | ------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
-| Tab URL, title, order    | Supported with `tabs`                       | Supported with `tabs`                                   | Shared snapshot fields                                      |
-| Pinned tabs              | Supported                                   | Supported                                               | Adapter-specific API calls                                  |
-| Active tab               | Supported                                   | Supported                                               | Shared semantics                                            |
-| Multiple normal windows  | Supported                                   | Supported                                               | Adapter-specific API calls                                  |
-| Window bounds            | Supported                                   | Supported                                               | Preserve best-effort geometry                               |
-| Window state             | normal / minimized / maximized / fullscreen | Same core states; API also defines `docked`             | Normalize unsupported `docked` to `normal` with a warning   |
-| Focused window           | Supported                                   | Supported                                               | Shared snapshot field                                       |
-| Tab-group membership     | Supported                                   | Supported                                               | Canonicalize browser group IDs                              |
-| Group title              | Supported                                   | Supported                                               | Shared snapshot field                                       |
-| Group color              | 9 shared colors                             | Same 9 colors                                           | Shared snapshot field                                       |
-| Group collapsed state    | Supported                                   | Supported                                               | Preserve state, accept browser-specific active-tab behavior |
-| Group IDs across restart | Ephemeral                                   | Ephemeral; restored IDs may differ                      | Never persist raw browser IDs                               |
-| Private windows          | User opt-in                                 | User-controlled “Run in Private Windows”                | Detect access; never silently claim capture                 |
-| Local companion          | Optional `127.0.0.1` permission             | `optional_host_permissions` supported in MV3            | Keep protocol and explicit Connect flow                     |
-| Extension background     | MV3 service worker                          | MV3 background script/event page                        | Firefox-specific manifest                                   |
-| API namespace            | `chrome.*` today                            | `browser.*` preferred; `chrome.*` supported for porting | Put API access behind Firefox adapter boundary              |
-| Store metadata           | Chromium manifest                           | Gecko ID + AMO data-collection declaration              | Firefox-specific manifest/package                           |
+| Capability | Chromium | Firefox 139+ | TabSnap behavior |
+| --- | --- | --- | --- |
+| Tab URL, title, order | Supported | Supported | Shared snapshot fields |
+| Pinned tabs | Supported | Supported | Shared restore engine |
+| Active tab | Supported | Supported | Shared restore engine |
+| Multiple normal windows | Supported | Supported | Shared restore engine |
+| Window bounds | Supported | Supported | Preserve best-effort geometry |
+| Window state | normal / minimized / maximized / fullscreen | Same core states; API also defines `docked` | Firefox normalizes `docked` to `normal` |
+| Focused window | Supported | Supported | Shared snapshot field |
+| Tab-group membership | Supported | Supported | Browser IDs become snapshot-local IDs |
+| Group title | Supported | Supported | Shared snapshot field |
+| Group color | 9 shared colors | Same 9 colors | Shared snapshot field |
+| Group collapsed state | Supported | Supported | Preserve state; accept native UI differences |
+| Group IDs across restart | Ephemeral | Ephemeral | Never persist raw browser IDs |
+| Private windows | User opt-in | User-controlled “Run in Private Windows” | Never bypass browser policy |
+| Local companion | Optional loopback permission | Optional loopback permission | Same authenticated protocol |
+| Extension background | MV3 service worker | MV3 background script/event page | Separate manifests |
+| Store metadata | Chromium manifest | Gecko ID + AMO declaration | Separate Firefox package |
+
+## Adapter architecture
+
+`browser.ts` is only a runtime dispatcher. Capture and restore are implemented once by the shared WebExtension adapter.
+
+Chromium and Firefox supply small configuration layers for:
+
+- browser/source metadata
+- restore URL policy
+- captured window-state normalization
+
+This keeps ordering, groups, pinning, focus, geometry, partial-failure handling and non-destructive restore in one implementation.
 
 ## Restore URL policy
 
-Firefox rejects several URLs that Chromium handling alone does not cover. In particular, `tabs.create()` rejects `chrome:`, `javascript:`, `data:`, `file:` and privileged `about:` URLs such as `about:config`, `about:addons` and `about:debugging`.
+Firefox rejects several URLs that Chromium may attempt, including `chrome:`, `javascript:`, `data:`, `file:` and privileged `about:` pages such as `about:config`, `about:addons` and `about:debugging`.
 
-M26 must therefore use a browser-specific restore policy. The snapshot still keeps the original URL. Restore skips URLs Firefox cannot create and returns a warning instead of deleting data from the snapshot.
+TabSnap keeps the original URL in the snapshot. Firefox restore skips unsupported URLs and reports a warning instead of deleting data from the snapshot.
 
-`about:blank` is valid. `about:newtab` is special: Firefox documents opening the New Tab page by omitting the `url` property rather than passing `about:newtab` directly.
+`about:blank` is restored normally. `about:newtab` is restored by omitting the `url` property so Firefox creates its native new-tab page.
 
 ## Tab groups
 
 Firefox 139+ exposes `tabGroups` plus `tabs.group()` / `tabs.ungroup()`. The group color vocabulary matches Chromium: `blue`, `cyan`, `grey`, `green`, `orange`, `pink`, `purple`, `red`, `yellow`.
 
-One visible semantic difference remains: Firefox can keep the active tab visible inside a collapsed group, while Chrome collapses the group completely and moves the active tab. TabSnap should preserve the requested `collapsed` value and active-tab intent, then accept the browser's native result instead of trying to emulate Chrome UI behavior.
+Firefox can keep the active tab visible inside a collapsed group while Chromium may move the active tab. TabSnap preserves the requested `collapsed` value and active-tab intent, then accepts the browser's native result.
 
-Raw browser group IDs remain runtime-local. TabSnap already maps groups to snapshot-local IDs, which is the correct cross-browser behavior.
+Raw group IDs remain runtime-local and are never serialized directly.
 
 ## Windows
 
-Firefox exposes window position, size, focus and state. Like Chromium, maximized/minimized/fullscreen creation cannot be combined with explicit bounds. Restore should continue creating geometry first and applying the final non-normal state afterward.
+Firefox exposes window position, size, focus and state. TabSnap creates geometry first and applies a final non-normal state afterward, matching the existing Chromium restore path.
 
-The WebExtensions `WindowState` type also contains `docked`, which is outside the TabSnap v1 schema. If Firefox ever returns it for a captured normal browser window, M26 should normalize it to `normal` rather than expand the file format for a platform-specific edge case.
+The WebExtensions `WindowState` type also contains `docked`, which is outside the `.tabsnap` v1 cross-browser state set. Firefox capture normalizes that value to `normal`.
 
 ## Manifest and packaging
 
-The Firefox package needs its own manifest even though most application code remains shared.
+The production Firefox manifest is `apps/chrome-extension/firefox-manifest.json`.
 
-The M25 reference manifest is `tests/fixtures/firefox-manifest-v3.json`. CI audits these invariants:
+The package is staged in `apps/chrome-extension/dist-firefox/` from the same application bundle used by Chromium, with the Firefox manifest replacing the Chromium manifest.
+
+CI verifies:
 
 - Manifest V3
 - Firefox 139 minimum
 - exactly `tabs` + `tabGroups`
-- loopback access remains optional
-- `background.scripts` uses the existing `background.js`
-- no dependency on `background.service_worker`
-- a Gecko extension ID exists for MV3 signing
-- AMO data collection declaration is `required: ["none"]`
+- optional localhost companion access only
+- `background.scripts` and no service worker dependency
+- stable Gecko ID `tabsnap@ascheriit-dkp.github.io`
+- AMO data collection declaration `required: ["none"]`
 - no content scripts, required host permissions or custom update URL
+- Mozilla `web-ext lint`
+- deterministic Firefox ZIP + SHA-256 artifact
 
-The fixture ID `tabsnap-spike@invalid.local` is deliberately non-release metadata. M26/M28 must choose the stable production Gecko ID before AMO signing and never change it afterward.
+## Automated test boundary
 
-## API boundary for M26
+The Firefox runtime detector and browser-specific policies are unit-tested. The shared capture/restore implementation continues to be exercised end-to-end through Chromium/Edge integration tests.
 
-Do not scatter `if (firefox)` checks through the Chromium implementation. M26 should introduce a Firefox adapter/runtime boundary and keep these layers shared:
-
-- `.tabsnap` schema and validation
-- canonical serialization
-- compression
-- encryption
-- extension UI where browser behavior is not involved
-- companion pairing and encrypted-byte protocol
-
-Firefox-specific code owns browser metadata detection, capture/restore calls, URL restore policy, manifest generation and any API behavior differences.
+Playwright's documented extension loading flow is Chromium-only, so CI does not pretend that a Chromium process is a real Firefox WebExtension runtime. A manual Firefox temporary-install check is required before AMO submission in M28.
 
 ## Sources
 
