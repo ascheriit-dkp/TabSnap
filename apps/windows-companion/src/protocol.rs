@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -91,7 +92,10 @@ impl ProtocolServer {
 
         if request.method == "OPTIONS" {
             if cors_origin.is_none() {
-                return HttpResponse::json_error(403, "CORS preflight requires an extension origin.");
+                return HttpResponse::json_error(
+                    403,
+                    "CORS preflight requires an extension origin.",
+                );
             }
             if !is_protocol_path(&request.path) {
                 return HttpResponse::json_error(404, "Unknown protocol endpoint.")
@@ -162,7 +166,10 @@ impl ProtocolServer {
             .header("content-type")
             .is_none_or(|value| !value.eq_ignore_ascii_case("application/octet-stream"))
         {
-            return HttpResponse::json_error(415, "Snapshot body must be application/octet-stream.");
+            return HttpResponse::json_error(
+                415,
+                "Snapshot body must be application/octet-stream.",
+            );
         }
         let Some(name) = request.header("x-tabsnap-name") else {
             return HttpResponse::json_error(400, "X-TabSnap-Name is required.");
@@ -299,14 +306,18 @@ impl HttpResponse {
         if let Some(origin) = origin {
             self.headers
                 .push(("Access-Control-Allow-Origin".to_owned(), origin.to_owned()));
-            self.headers
-                .push(("Access-Control-Allow-Methods".to_owned(), "GET, POST, OPTIONS".to_owned()));
+            self.headers.push((
+                "Access-Control-Allow-Methods".to_owned(),
+                "GET, POST, OPTIONS".to_owned(),
+            ));
             self.headers.push((
                 "Access-Control-Allow-Headers".to_owned(),
                 "Authorization, Content-Type, X-TabSnap-Name".to_owned(),
             ));
-            self.headers
-                .push(("Access-Control-Allow-Private-Network".to_owned(), "true".to_owned()));
+            self.headers.push((
+                "Access-Control-Allow-Private-Network".to_owned(),
+                "true".to_owned(),
+            ));
             self.headers.push(("Vary".to_owned(), "Origin".to_owned()));
         }
         self
@@ -328,7 +339,10 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, RequestError> {
             .read(&mut chunk)
             .map_err(|_| RequestError::new(400, "Unable to read request."))?;
         if read == 0 {
-            return Err(RequestError::new(400, "Request ended before headers completed."));
+            return Err(RequestError::new(
+                400,
+                "Request ended before headers completed.",
+            ));
         }
         received.extend_from_slice(&chunk[..read]);
         if received.len() > MAX_HEADER_BYTES + MAX_SNAPSHOT_FILE_BYTES as usize {
@@ -357,7 +371,10 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, RequestError> {
         .next()
         .ok_or_else(|| RequestError::new(400, "HTTP version is missing."))?;
     if request_parts.next().is_some() || version != "HTTP/1.1" {
-        return Err(RequestError::new(400, "Only HTTP/1.1 requests are accepted."));
+        return Err(RequestError::new(
+            400,
+            "Only HTTP/1.1 requests are accepted.",
+        ));
     }
     if !matches!(method, "GET" | "POST" | "OPTIONS") {
         return Err(RequestError::new(405, "HTTP method is not allowed."));
@@ -384,7 +401,10 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, RequestError> {
     }
 
     if headers.contains_key("transfer-encoding") {
-        return Err(RequestError::new(400, "Transfer-Encoding is not supported."));
+        return Err(RequestError::new(
+            400,
+            "Transfer-Encoding is not supported.",
+        ));
     }
 
     let content_length = match headers.get("content-length") {
@@ -394,15 +414,24 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, RequestError> {
         None => 0,
     };
     if content_length as u64 > MAX_SNAPSHOT_FILE_BYTES {
-        return Err(RequestError::new(413, "Request body exceeds the protocol limit."));
+        return Err(RequestError::new(
+            413,
+            "Request body exceeds the protocol limit.",
+        ));
     }
     if method == "POST" && !headers.contains_key("content-length") {
-        return Err(RequestError::new(411, "POST requests require Content-Length."));
+        return Err(RequestError::new(
+            411,
+            "POST requests require Content-Length.",
+        ));
     }
 
     let mut body = received[header_end..].to_vec();
     if body.len() > content_length {
-        return Err(RequestError::new(400, "Request contains bytes beyond Content-Length."));
+        return Err(RequestError::new(
+            400,
+            "Request contains bytes beyond Content-Length.",
+        ));
     }
     while body.len() < content_length {
         let remaining = content_length - body.len();
@@ -453,10 +482,7 @@ fn write_response(stream: &mut TcpStream, response: HttpResponse) -> io::Result<
 }
 
 fn is_protocol_path(path: &str) -> bool {
-    matches!(
-        path,
-        "/v1/status" | "/v1/snapshots" | "/v1/snapshot"
-    )
+    matches!(path, "/v1/status" | "/v1/snapshots" | "/v1/snapshot")
 }
 
 fn valid_chrome_extension_origin(origin: &str) -> bool {
@@ -503,7 +529,24 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 fn is_header_name_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~')
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
 }
 
 fn header_value_is_safe(value: &str) -> bool {
@@ -595,8 +638,7 @@ mod tests {
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    const TEST_TOKEN: &str =
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const TEST_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const EXTENSION_ORIGIN: &str = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
 
     fn temp_root(label: &str) -> std::path::PathBuf {
@@ -604,7 +646,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("tabsnap-protocol-{label}-{}-{nonce}", process::id()))
+        std::env::temp_dir().join(format!(
+            "tabsnap-protocol-{label}-{}-{nonce}",
+            process::id()
+        ))
     }
 
     fn request(address: SocketAddr, request: &[u8]) -> Vec<u8> {
@@ -635,8 +680,18 @@ mod tests {
 
         assert_eq!(server.local_addr().unwrap().ip(), Ipv4Addr::LOCALHOST);
         assert_eq!(server.session_token().len(), TOKEN_BYTES * 2);
-        assert!(server.session_token().bytes().all(|byte| byte.is_ascii_hexdigit()));
-        assert!(server.pairing_code().unwrap().starts_with("tabsnap-companion:v1:"));
+        assert!(
+            server
+                .session_token()
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        );
+        assert!(
+            server
+                .pairing_code()
+                .unwrap()
+                .starts_with("tabsnap-companion:v1:")
+        );
     }
 
     #[test]
@@ -688,7 +743,9 @@ mod tests {
         let response_text = String::from_utf8(response).unwrap();
 
         assert!(response_text.starts_with("HTTP/1.1 204 No Content\r\n"));
-        assert!(response_text.contains(&format!("Access-Control-Allow-Origin: {EXTENSION_ORIGIN}\r\n")));
+        assert!(response_text.contains(&format!(
+            "Access-Control-Allow-Origin: {EXTENSION_ORIGIN}\r\n"
+        )));
         worker.join().unwrap();
         if root.exists() {
             fs::remove_dir_all(root).unwrap();
