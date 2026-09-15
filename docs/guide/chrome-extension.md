@@ -2,13 +2,21 @@
 
 The Level 1 client is a Manifest V3 Chrome extension.
 
-## Install an alpha release
+## Install a prerelease
 
 Download the Chrome ZIP from the matching GitHub prerelease and verify its published `.sha256` file if you want to check the artifact before installing it.
 
 Extract the ZIP, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, then select the extracted directory containing `manifest.json`.
 
-Alpha builds are for manual testing and are not published to the Chrome Web Store yet.
+Prerelease builds are for manual testing and are not published to the Chrome Web Store yet.
+
+## Open TabSnap
+
+Click the TabSnap toolbar action. It opens the TabSnap workspace as a normal extension tab instead of an ephemeral popup.
+
+If a TabSnap workspace tab is already open, another toolbar click focuses that existing tab and its window rather than opening a duplicate.
+
+Because the workflow lives in a normal tab, capture, encryption, decryption and restore are not interrupted merely because a browser popup loses focus.
 
 ## Build from source
 
@@ -50,15 +58,15 @@ Groups, pinning, active tabs, window geometry and window state are applied after
 
 ## Export and import
 
-The popup can:
+The workspace can:
 
 - encrypt a captured snapshot to a copyable `tabsnap:v1:` string
 - download the same encrypted envelope as a `.tabsnap` file
 - decrypt either representation locally
 - show a preview before restore
 
-Passwords exist only in the popup's memory and are never stored.
+Passwords exist only in the extension page's memory and are never stored.
 
-## Current limitation
+## Current scope
 
-Long operations run in the extension popup. Keep the popup open until capture, encryption, decryption or restore completes. A persistent full-page workflow can replace this in a later hardening milestone.
+Level 1 targets Chrome. Edge and Firefox are later roadmap levels, as is the optional portable Windows companion for whole-machine workflows.
