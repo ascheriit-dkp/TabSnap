@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+import process from 'node:process';
+import { URL } from 'node:url';
 
 const manifestPath = new URL('../tests/fixtures/firefox-manifest-v3.json', import.meta.url);
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -59,4 +61,4 @@ assert(
 );
 assert(manifest.update_url === undefined, 'Firefox spike must not introduce an update URL.');
 
-console.log('Firefox compatibility manifest audit passed.');
+process.stdout.write('Firefox compatibility manifest audit passed.\n');
