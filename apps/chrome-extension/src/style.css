@@ -72,7 +72,9 @@ label,
   letter-spacing: 0.12em;
 }
 
-.local-badge {
+.local-badge,
+.connection-badge,
+.optional-label {
   padding: 5px 8px;
   border: 1px solid #cbd5e1;
   border-radius: 999px;
@@ -82,12 +84,28 @@ label,
   font-weight: 700;
 }
 
+.optional-label {
+  margin-left: 4px;
+  padding: 2px 6px;
+  vertical-align: 2px;
+}
+
+.connection-badge[data-connected='true'] {
+  border-color: #a6f4c5;
+  background: #ecfdf3;
+  color: #067647;
+}
+
 .panel {
   padding: 16px;
   border: 1px solid #dce1e7;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+.companion-panel {
+  border-style: dashed;
 }
 
 .section-heading {
@@ -109,13 +127,15 @@ label {
 
 input,
 textarea,
+select,
 button,
 .file-button {
   font: inherit;
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid #cfd6df;
   border-radius: 8px;
@@ -124,7 +144,8 @@ textarea {
   outline: none;
 }
 
-input {
+input,
+select {
   min-height: 38px;
   padding: 8px 10px;
 }
@@ -138,9 +159,16 @@ textarea {
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   border-color: #667085;
   box-shadow: 0 0 0 2px rgb(102 112 133 / 12%);
+}
+
+input:disabled,
+select:disabled {
+  background: #f8fafc;
+  color: #98a2b3;
 }
 
 button,
@@ -171,6 +199,7 @@ button:disabled {
 .button-row {
   justify-content: flex-start;
   margin-top: 10px;
+  flex-wrap: wrap;
 }
 
 .file-button {
@@ -181,6 +210,30 @@ button:disabled {
 
 .file-button input {
   display: none;
+}
+
+.hint {
+  margin-top: 7px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.companion-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 8px;
+  align-items: end;
+}
+
+.companion-actions label {
+  margin-top: 0;
 }
 
 .preview {
@@ -231,7 +284,12 @@ button:disabled {
     flex-direction: column;
   }
 
-  .local-badge {
+  .local-badge,
+  .connection-badge {
     align-self: flex-start;
+  }
+
+  .companion-actions {
+    grid-template-columns: 1fr;
   }
 }
