@@ -238,13 +238,10 @@ test('captures and restores a real Chrome workspace non-destructively', async ()
       .toBe(4);
 
     await expect
-      .poll(
-        () => inspectRestoredWorkspace(extensionPage, urlA, urlB, originalWorkspace.windowId),
-        {
-          message: 'A second window should reproduce the fixture tabs, pinning and group metadata.',
-          timeout: 10_000,
-        },
-      )
+      .poll(() => inspectRestoredWorkspace(extensionPage, urlA, urlB, originalWorkspace.windowId), {
+        message: 'A second window should reproduce the fixture tabs, pinning and group metadata.',
+        timeout: 10_000,
+      })
       .toMatchObject({
         firstPinned: true,
         firstActive: true,
