@@ -37,7 +37,10 @@ impl SnapshotLibrary {
         if self.root.exists() && !self.root.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Snapshot library is not a directory: {}", self.root.display()),
+                format!(
+                    "Snapshot library is not a directory: {}",
+                    self.root.display()
+                ),
             ));
         }
         fs::create_dir_all(&self.root)
@@ -50,7 +53,10 @@ impl SnapshotLibrary {
         if !self.root.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Snapshot library is not a directory: {}", self.root.display()),
+                format!(
+                    "Snapshot library is not a directory: {}",
+                    self.root.display()
+                ),
             ));
         }
 
@@ -58,7 +64,7 @@ impl SnapshotLibrary {
         for entry in fs::read_dir(&self.root)? {
             let entry = entry?;
             let file_type = entry.file_type()?;
-            if !file_type.is_file() || file_type.is_symlink() {
+            if !file_type.is_file() {
                 continue;
             }
 
@@ -96,10 +102,12 @@ impl SnapshotLibrary {
         self.ensure()?;
         validate_snapshot_source(source)?;
 
-        let source_name = source
-            .file_name()
-            .and_then(OsStr::to_str)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Snapshot file name is not valid Unicode."))?;
+        let source_name = source.file_name().and_then(OsStr::to_str).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Snapshot file name is not valid Unicode.",
+            )
+        })?;
         let destination_name = available_snapshot_name(&self.root, source_name)?;
         let destination = self.root.join(destination_name);
 
@@ -127,7 +135,10 @@ impl SnapshotLibrary {
         if destination_dir.exists() && !destination_dir.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Export destination is not a directory: {}", destination_dir.display()),
+                format!(
+                    "Export destination is not a directory: {}",
+                    destination_dir.display()
+                ),
             ));
         }
         fs::create_dir_all(destination_dir)?;
@@ -144,7 +155,12 @@ fn entry_from_path(path: PathBuf) -> io::Result<SnapshotEntry> {
     let file_name = path
         .file_name()
         .and_then(OsStr::to_str)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Snapshot file name is not valid Unicode."))?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Snapshot file name is not valid Unicode.",
+            )
+        })?
         .to_owned();
 
     Ok(SnapshotEntry {
@@ -164,7 +180,7 @@ fn validate_snapshot_source(path: &Path) -> io::Result<()> {
     }
 
     let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+    if !metadata.file_type().is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Snapshot source must be a regular file, not a directory or symbolic link.",
@@ -210,7 +226,10 @@ fn safe_snapshot_name(suggested_name: &str) -> String {
     let mut stem = String::new();
     for character in raw_stem.chars() {
         let invalid = character.is_control()
-            || matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*');
+            || matches!(
+                character,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+            );
         stem.push(if invalid { '_' } else { character });
         if stem.chars().count() >= MAX_STEM_CHARS {
             break;
@@ -228,7 +247,7 @@ fn safe_snapshot_name(suggested_name: &str) -> String {
         .split('.')
         .next()
         .unwrap_or_default()
-        .trim_end_matches([' ', '.']);
+        .trim_end_matches(|character: char| character == ' ' || character == '.');
     if is_windows_reserved_name(reserved_candidate) {
         stem.insert(0, '_');
     }
@@ -243,10 +262,10 @@ fn is_windows_reserved_name(value: &str) -> bool {
     }
 
     for prefix in ["COM", "LPT"] {
-        if let Some(number) = upper.strip_prefix(prefix) {
-            if matches!(number, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") {
-                return true;
-            }
+        if upper.strip_prefix(prefix).is_some_and(|number| {
+            matches!(number, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+        }) {
+            return true;
         }
     }
     false
@@ -276,7 +295,10 @@ fn available_snapshot_name(directory: &Path, suggested_name: &str) -> io::Result
 
 fn atomic_write_bytes(destination: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = destination.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "Snapshot destination has no parent directory.")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Snapshot destination has no parent directory.",
+        )
     })?;
     let (temp_path, mut temp_file) = create_temp_file(parent)?;
 
@@ -295,7 +317,10 @@ fn atomic_write_bytes(destination: &Path, bytes: &[u8]) -> io::Result<()> {
 
 fn atomic_copy_snapshot(source: &Path, destination: &Path) -> io::Result<()> {
     let parent = destination.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "Snapshot destination has no parent directory.")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Snapshot destination has no parent directory.",
+        )
     })?;
     let (temp_path, mut temp_file) = create_temp_file(parent)?;
 
@@ -324,10 +349,7 @@ fn create_temp_file(directory: &Path) -> io::Result<(PathBuf, File)> {
         .as_nanos();
 
     for attempt in 0..MAX_TEMP_ATTEMPTS {
-        let path = directory.join(format!(
-            ".tabsnap-tmp-{}-{nonce}-{attempt}",
-            process::id()
-        ));
+        let path = directory.join(format!(".tabsnap-tmp-{}-{nonce}-{attempt}", process::id()));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(file) => return Ok((path, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -364,7 +386,12 @@ mod tests {
         let leftovers = fs::read_dir(directory)
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with(".tabsnap-tmp-"))
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".tabsnap-tmp-")
+            })
             .count();
         assert_eq!(leftovers, 0);
     }
@@ -388,8 +415,12 @@ mod tests {
     fn writes_opaque_bytes_atomically_and_uses_collision_safe_names() {
         let root = temp_root("write");
         let library = SnapshotLibrary::new(&root);
-        let first = library.write_snapshot("Work Session", b"encrypted-one").unwrap();
-        let second = library.write_snapshot("Work Session.tabsnap", b"encrypted-two").unwrap();
+        let first = library
+            .write_snapshot("Work Session", b"encrypted-one")
+            .unwrap();
+        let second = library
+            .write_snapshot("Work Session.tabsnap", b"encrypted-two")
+            .unwrap();
 
         assert_eq!(first.file_name, "Work Session.tabsnap");
         assert_eq!(second.file_name, "Work Session (2).tabsnap");
@@ -408,7 +439,10 @@ mod tests {
 
         assert_eq!(entry.path.parent(), Some(root.as_path()));
         assert!(entry.file_name.ends_with(".tabsnap"));
-        assert!(!entry.file_name.contains(['/', '\\', ':', '<', '>', '*']));
+        assert!(!entry
+            .file_name
+            .chars()
+            .any(|character| matches!(character, '/' | '\\' | ':' | '<' | '>' | '*')));
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -448,7 +482,10 @@ mod tests {
         huge.set_len(MAX_SNAPSHOT_FILE_BYTES + 1).unwrap();
         let library = SnapshotLibrary::new(&root);
 
-        assert_eq!(library.import_file(&wrong).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            library.import_file(&wrong).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
         assert_eq!(
             library.import_file(&oversized).unwrap_err().kind(),
             io::ErrorKind::InvalidInput
@@ -473,7 +510,10 @@ mod tests {
 
         assert_eq!(exported.file_name().unwrap(), "home (2).tabsnap");
         assert_eq!(fs::read(exported).unwrap(), b"ciphertext");
-        assert_eq!(fs::read(destination.join("home.tabsnap")).unwrap(), b"existing");
+        assert_eq!(
+            fs::read(destination.join("home.tabsnap")).unwrap(),
+            b"existing"
+        );
         assert_no_temp_files(&destination);
 
         fs::remove_dir_all(root).unwrap();
@@ -487,7 +527,9 @@ mod tests {
         let library = SnapshotLibrary::new(&root);
         library.write_snapshot("safe", b"opaque").unwrap();
 
-        let error = library.export_file("../safe.tabsnap", &destination).unwrap_err();
+        let error = library
+            .export_file("../safe.tabsnap", &destination)
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
 
         fs::remove_dir_all(root).unwrap();
