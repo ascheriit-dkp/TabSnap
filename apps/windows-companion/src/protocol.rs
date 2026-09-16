@@ -16,6 +16,7 @@ use crate::coordination::{
     valid_instance_id,
 };
 use crate::library::{MAX_SNAPSHOT_FILE_BYTES, SnapshotLibrary};
+use crate::machine::{MachineSnapshotEntry, MachineSnapshotLibrary};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 const TOKEN_BYTES: usize = 32;
@@ -74,6 +75,22 @@ impl CaptureControl {
             .lock()
             .map_err(|_| io::Error::other("Capture job store is unavailable."))?;
         Ok(jobs.status(job_id, Instant::now()))
+    }
+
+    pub fn persist_capture_job(
+        &self,
+        library: &MachineSnapshotLibrary,
+        job_id: &str,
+        suggested_name: &str,
+    ) -> io::Result<MachineSnapshotEntry> {
+        let mut jobs = self
+            .capture_jobs
+            .lock()
+            .map_err(|_| io::Error::other("Capture job store is unavailable."))?;
+        let export = jobs
+            .terminal_export(job_id, Instant::now())
+            .map_err(capture_control_error)?;
+        library.write_capture_job(suggested_name, &export)
     }
 }
 
@@ -941,6 +958,13 @@ fn capture_control_error(error: CaptureJobError) -> io::Error {
             "No connected browser advertises capture capability.",
         ),
         CaptureJobError::CapacityExceeded => io::Error::other("Capture job capacity is exhausted."),
+        CaptureJobError::NotFound => {
+            io::Error::new(io::ErrorKind::NotFound, "Capture job was not found.")
+        }
+        CaptureJobError::NotTerminal => io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "Capture job is not complete yet.",
+        ),
         CaptureJobError::InvalidJobId | CaptureJobError::DuplicateJob => {
             io::Error::other("Unable to allocate capture job.")
         }

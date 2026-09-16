@@ -80,7 +80,10 @@ impl MachineSnapshotLibrary {
         if self.root.exists() && !self.root.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Machine snapshot library is not a directory: {}", self.root.display()),
+                format!(
+                    "Machine snapshot library is not a directory: {}",
+                    self.root.display()
+                ),
             ));
         }
         fs::create_dir_all(&self.root)
@@ -108,9 +111,7 @@ impl MachineSnapshotLibrary {
             })
             .try_fold(0_u64, |total, bytes| total.checked_add(bytes))
             .ok_or_else(|| invalid_data("Machine snapshot payload size overflow."))?;
-        let total_bytes = PREFIX_BYTES as u64
-            + encoded.len() as u64
-            + payload_bytes;
+        let total_bytes = PREFIX_BYTES as u64 + encoded.len() as u64 + payload_bytes;
         if total_bytes > MAX_MACHINE_FILE_BYTES {
             return Err(machine_too_large_error());
         }
@@ -143,7 +144,12 @@ impl MachineSnapshotLibrary {
             .targets
             .iter()
             .find(|target| target.instance_id == instance_id)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Browser instance is not in the machine snapshot."))?;
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Browser instance is not in the machine snapshot.",
+                )
+            })?;
         let (payload_offset, payload_len) = match target.state {
             MachineTargetState::Complete {
                 payload_offset,
@@ -181,6 +187,7 @@ fn encode_manifest(capture: &CaptureJobExport<'_>, stored_unix_ms: u64) -> io::R
 
     let mut seen = HashSet::new();
     let mut payload_bytes = 0_usize;
+    let mut complete_targets = 0_usize;
     let mut output = Vec::with_capacity(1024);
     output.extend_from_slice(&stored_unix_ms.to_be_bytes());
     output.extend_from_slice(&decode_hex_128(capture.job_id)?);
@@ -194,7 +201,9 @@ fn encode_manifest(capture: &CaptureJobExport<'_>, stored_unix_ms: u64) -> io::R
     for target in &capture.targets {
         let instance = target.instance();
         if !seen.insert(instance.instance_id.as_str()) {
-            return Err(invalid_data("Machine snapshot has duplicate browser instance ids."));
+            return Err(invalid_data(
+                "Machine snapshot has duplicate browser instance ids.",
+            ));
         }
         output.extend_from_slice(&decode_hex_128(&instance.instance_id)?);
         output.push(browser_code(instance.browser));
@@ -219,6 +228,7 @@ fn encode_manifest(capture: &CaptureJobExport<'_>, stored_unix_ms: u64) -> io::R
                 if encrypted.is_empty() || encrypted.len() > MAX_CAPTURE_RESULT_BYTES {
                     return Err(invalid_data("Encrypted browser payload size is invalid."));
                 }
+                complete_targets += 1;
                 payload_bytes = payload_bytes
                     .checked_add(encrypted.len())
                     .ok_or_else(|| invalid_data("Machine snapshot payload size overflow."))?;
@@ -239,6 +249,11 @@ fn encode_manifest(capture: &CaptureJobExport<'_>, stored_unix_ms: u64) -> io::R
         }
     }
 
+    if complete_targets == 0 {
+        return Err(invalid_data(
+            "Machine snapshot requires at least one encrypted browser payload.",
+        ));
+    }
     if output.is_empty() || output.len() > MAX_MACHINE_MANIFEST_BYTES {
         return Err(invalid_data("Machine snapshot manifest is too large."));
     }
@@ -342,7 +357,9 @@ fn parse_manifest(bytes: &[u8], payload_start: u64) -> io::Result<MachineManifes
     for _ in 0..target_count {
         let instance_id = encode_hex_128(cursor.array_16()?);
         if !seen.insert(instance_id.clone()) {
-            return Err(invalid_data("Machine snapshot has duplicate browser instance ids."));
+            return Err(invalid_data(
+                "Machine snapshot has duplicate browser instance ids.",
+            ));
         }
         let browser = parse_browser_code(cursor.u8()?)?;
         let version_len = cursor.u8()? as usize;
@@ -496,14 +513,21 @@ fn safe_machine_name(suggested_name: &str) -> String {
     let mut stem = String::new();
     for character in raw_stem.chars() {
         let invalid = character.is_control()
-            || matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*');
+            || matches!(
+                character,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+            );
         stem.push(if invalid { '_' } else { character });
         if stem.chars().count() >= MAX_STEM_CHARS {
             break;
         }
     }
     let trimmed = stem.trim_matches(|character: char| character == ' ' || character == '.');
-    let stem = if trimmed.is_empty() { "machine" } else { trimmed };
+    let stem = if trimmed.is_empty() {
+        "machine"
+    } else {
+        trimmed
+    };
     format!("{stem}{suffix}")
 }
 
@@ -637,13 +661,17 @@ impl<'a> SliceCursor<'a> {
 
     fn u32(&mut self) -> io::Result<u32> {
         Ok(u32::from_be_bytes(
-            self.take(4)?.try_into().expect("cursor returned four bytes"),
+            self.take(4)?
+                .try_into()
+                .expect("cursor returned four bytes"),
         ))
     }
 
     fn u64(&mut self) -> io::Result<u64> {
         Ok(u64::from_be_bytes(
-            self.take(8)?.try_into().expect("cursor returned eight bytes"),
+            self.take(8)?
+                .try_into()
+                .expect("cursor returned eight bytes"),
         ))
     }
 
@@ -675,10 +703,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "tabsnap-machine-{label}-{}-{nonce}",
-            process::id()
-        ))
+        std::env::temp_dir().join(format!("tabsnap-machine-{label}-{}-{nonce}", process::id()))
     }
 
     fn capture_store() -> CaptureJobStore {
@@ -743,7 +768,10 @@ mod tests {
         assert_eq!(entry.manifest.targets.len(), 2);
         assert_eq!(entry.manifest.targets[0].instance_id, CHROME_ID);
         assert_eq!(entry.manifest.targets[0].browser, BrowserKind::Chrome);
-        assert_eq!(entry.manifest.targets[0].version.as_deref(), Some("140.0.0.0"));
+        assert_eq!(
+            entry.manifest.targets[0].version.as_deref(),
+            Some("140.0.0.0")
+        );
         assert!(matches!(
             entry.manifest.targets[0].state,
             MachineTargetState::Complete { payload_len: 5, .. }
@@ -755,7 +783,9 @@ mod tests {
             }
         ));
         assert_eq!(
-            library.read_encrypted_payload(&entry.file_name, CHROME_ID).unwrap(),
+            library
+                .read_encrypted_payload(&entry.file_name, CHROME_ID)
+                .unwrap(),
             vec![1, 2, 3, 4, 255]
         );
         assert_no_temp_files(&root);

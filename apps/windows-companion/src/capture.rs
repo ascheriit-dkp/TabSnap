@@ -90,6 +90,32 @@ pub struct CaptureAssignment {
     pub job_id: String,
 }
 
+#[derive(Debug)]
+pub enum CaptureTargetExport<'a> {
+    Complete {
+        instance: &'a BrowserInstance,
+        encrypted: &'a [u8],
+    },
+    Failed {
+        instance: &'a BrowserInstance,
+        reason: CaptureFailure,
+    },
+}
+
+impl CaptureTargetExport<'_> {
+    pub fn instance(&self) -> &BrowserInstance {
+        match self {
+            Self::Complete { instance, .. } | Self::Failed { instance, .. } => instance,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CaptureJobExport<'a> {
+    pub job_id: &'a str,
+    pub targets: Vec<CaptureTargetExport<'a>>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureJobError {
     InvalidJobId,
@@ -99,6 +125,7 @@ pub enum CaptureJobError {
     NotFound,
     TargetNotFound,
     AlreadyFinished,
+    NotTerminal,
     EmptyResult,
     ResultTooLarge,
     JobBytesExceeded,
@@ -317,6 +344,45 @@ impl CaptureJobStore {
                 Err(CaptureJobError::AlreadyFinished)
             }
         }
+    }
+
+    pub fn terminal_export(
+        &mut self,
+        job_id: &str,
+        now: Instant,
+    ) -> Result<CaptureJobExport<'_>, CaptureJobError> {
+        self.refresh(now);
+        let job = self.jobs.get(job_id).ok_or(CaptureJobError::NotFound)?;
+        if job.targets.iter().any(|target| {
+            matches!(
+                target.state,
+                CaptureTargetState::Pending | CaptureTargetState::Claimed { .. }
+            )
+        }) {
+            return Err(CaptureJobError::NotTerminal);
+        }
+
+        let targets = job
+            .targets
+            .iter()
+            .map(|target| match &target.state {
+                CaptureTargetState::Complete { encrypted } => CaptureTargetExport::Complete {
+                    instance: &target.instance,
+                    encrypted,
+                },
+                CaptureTargetState::Failed { reason } => CaptureTargetExport::Failed {
+                    instance: &target.instance,
+                    reason: *reason,
+                },
+                CaptureTargetState::Pending | CaptureTargetState::Claimed { .. } => {
+                    unreachable!("terminal capture export checked unfinished targets")
+                }
+            })
+            .collect();
+        Ok(CaptureJobExport {
+            job_id: &job.job_id,
+            targets,
+        })
     }
 
     pub fn status(&mut self, job_id: &str, now: Instant) -> Option<CaptureJobStatus> {
@@ -541,6 +607,35 @@ mod tests {
             jobs.submit_result(JOB_ID, FIREFOX_ID, vec![0; 16], start),
             Err(CaptureJobError::AlreadyFinished)
         );
+    }
+
+    #[test]
+    fn terminal_export_rejects_live_jobs_and_borrows_opaque_results() {
+        let start = Instant::now();
+        let mut jobs = store();
+        jobs.create(
+            JOB_ID.to_owned(),
+            vec![instance(
+                CHROME_ID,
+                BrowserKind::Chrome,
+                vec![BrowserCapability::Capture],
+            )],
+            start,
+        )
+        .unwrap();
+
+        assert_eq!(
+            jobs.terminal_export(JOB_ID, start).unwrap_err(),
+            CaptureJobError::NotTerminal
+        );
+        jobs.submit_result(JOB_ID, CHROME_ID, vec![4, 5, 6], start)
+            .unwrap();
+        let export = jobs.terminal_export(JOB_ID, start).unwrap();
+        assert_eq!(export.job_id, JOB_ID);
+        assert!(matches!(
+            &export.targets[0],
+            CaptureTargetExport::Complete { encrypted, .. } if *encrypted == [4, 5, 6]
+        ));
     }
 
     #[test]

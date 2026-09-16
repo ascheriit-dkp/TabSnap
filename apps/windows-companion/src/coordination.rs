@@ -255,7 +255,7 @@ pub fn valid_instance_id(value: &str) -> bool {
             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-fn valid_browser_version(value: &str) -> bool {
+pub fn valid_browser_version(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_BROWSER_VERSION_LENGTH
         && value
