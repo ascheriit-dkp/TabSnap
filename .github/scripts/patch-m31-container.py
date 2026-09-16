@@ -287,7 +287,9 @@ replace_once(
                 current.completed_count(),
                 current.failed_count()
             );
-            println!("M30 results are held in memory only; M31 adds the machine snapshot container.");
+            println!(
+                "M30 results are held in memory only; M31 adds the machine snapshot container."
+            );
             return Ok(());
 ''',
     '''            println!(
