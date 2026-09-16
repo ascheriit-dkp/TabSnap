@@ -7,6 +7,7 @@ import {
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 
 import { captureWorkspace, currentBrowser, restoreWorkspace } from './browser.js';
+import { requestCompanionDataConsent } from './companion-consent.js';
 import {
   CompanionClient,
   COMPANION_ORIGIN_PERMISSION,
@@ -310,6 +311,12 @@ restoreButton.addEventListener('click', () => {
 companionConnectButton.addEventListener('click', () => {
   void run('Connecting to portable companion', async () => {
     const pairing = parseCompanionPairingCode(companionPairing.value);
+    const browser = currentBrowser();
+    const dataConsentGranted = await requestCompanionDataConsent(browser);
+    if (!dataConsentGranted) {
+      throw new Error('Companion data consent was not granted. Companion mode stays off.');
+    }
+
     const alreadyGranted = await hasCompanionOriginPermission();
     const granted =
       alreadyGranted ||
@@ -329,7 +336,7 @@ companionConnectButton.addEventListener('click', () => {
     companionPairing.value = '';
     await refreshCompanionLibrary(client);
     setStatus(
-      'Portable companion connected for this page session. The pairing token is kept in memory only.',
+      'Portable companion connected for this page session. Firefox companion mode is opt-in; encrypted snapshots can leave the extension only after consent. The pairing token is kept in memory only.',
       'success',
     );
   });
