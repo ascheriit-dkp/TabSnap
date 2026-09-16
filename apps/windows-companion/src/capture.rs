@@ -266,6 +266,18 @@ impl CaptureJobStore {
         }
 
         let job = self.jobs.get_mut(job_id).ok_or(CaptureJobError::NotFound)?;
+        let target_index = job
+            .targets
+            .iter()
+            .position(|target| target.instance.instance_id == instance_id)
+            .ok_or(CaptureJobError::TargetNotFound)?;
+        if matches!(
+            job.targets[target_index].state,
+            CaptureTargetState::Complete { .. } | CaptureTargetState::Failed { .. }
+        ) {
+            return Err(CaptureJobError::AlreadyFinished);
+        }
+
         let current_bytes = job
             .targets
             .iter()
@@ -278,20 +290,8 @@ impl CaptureJobStore {
             return Err(CaptureJobError::JobBytesExceeded);
         }
 
-        let target = job
-            .targets
-            .iter_mut()
-            .find(|target| target.instance.instance_id == instance_id)
-            .ok_or(CaptureJobError::TargetNotFound)?;
-        match target.state {
-            CaptureTargetState::Pending | CaptureTargetState::Claimed { .. } => {
-                target.state = CaptureTargetState::Complete { encrypted };
-                Ok(())
-            }
-            CaptureTargetState::Complete { .. } | CaptureTargetState::Failed { .. } => {
-                Err(CaptureJobError::AlreadyFinished)
-            }
-        }
+        job.targets[target_index].state = CaptureTargetState::Complete { encrypted };
+        Ok(())
     }
 
     pub fn submit_failure(
@@ -505,6 +505,42 @@ mod tests {
                 reason: CaptureFailure::PasswordRequired
             }
         ));
+    }
+
+    #[test]
+    fn duplicate_terminal_submissions_report_already_finished_before_byte_limits() {
+        let start = Instant::now();
+        let mut jobs = store();
+        jobs.create(
+            JOB_ID.to_owned(),
+            vec![
+                instance(
+                    CHROME_ID,
+                    BrowserKind::Chrome,
+                    vec![BrowserCapability::Capture],
+                ),
+                instance(
+                    FIREFOX_ID,
+                    BrowserKind::Firefox,
+                    vec![BrowserCapability::Capture],
+                ),
+            ],
+            start,
+        )
+        .unwrap();
+
+        jobs.submit_result(JOB_ID, CHROME_ID, vec![0; 16], start)
+            .unwrap();
+        assert_eq!(
+            jobs.submit_result(JOB_ID, CHROME_ID, vec![0; 16], start),
+            Err(CaptureJobError::AlreadyFinished)
+        );
+        jobs.submit_failure(JOB_ID, FIREFOX_ID, CaptureFailure::CaptureFailed, start)
+            .unwrap();
+        assert_eq!(
+            jobs.submit_result(JOB_ID, FIREFOX_ID, vec![0; 16], start),
+            Err(CaptureJobError::AlreadyFinished)
+        );
     }
 
     #[test]
