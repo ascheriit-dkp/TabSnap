@@ -1,6 +1,6 @@
 [package]
 name = "tabsnap-companion"
-version = "0.3.0-alpha.3"
+version = "0.3.0-alpha.4"
 edition = "2024"
 rust-version = "1.85"
 description = "Portable Windows companion for TabSnap"
