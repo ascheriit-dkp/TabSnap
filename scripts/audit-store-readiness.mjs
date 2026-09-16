@@ -33,7 +33,10 @@ for (const [name, document] of [
   ['reviewer notes', reviewerNotes],
 ]) {
   assert(document.trim().length > 200, `${name} is missing or suspiciously short.`);
-  assert(!/\b(?:TODO|TBD|PLACEHOLDER)\b/u.test(document), `${name} contains an unresolved placeholder.`);
+  assert(
+    !/\b(?:TODO|TBD|PLACEHOLDER)\b/u.test(document),
+    `${name} contains an unresolved placeholder.`,
+  );
 }
 
 for (const [browser, manifest] of [
@@ -49,7 +52,10 @@ for (const [browser, manifest] of [
     sameStrings(manifest.optional_host_permissions, [companionOrigin]),
     `${browser} loopback access must remain optional and IPv4-only.`,
   );
-  assert(manifest.host_permissions === undefined, `${browser} must not add required host permissions.`);
+  assert(
+    manifest.host_permissions === undefined,
+    `${browser} must not add required host permissions.`,
+  );
   assert(manifest.content_scripts === undefined, `${browser} must not add content scripts.`);
   assert(manifest.update_url === undefined, `${browser} must not add a custom update URL.`);
 }

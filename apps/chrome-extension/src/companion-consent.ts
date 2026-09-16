@@ -3,10 +3,7 @@ import type { Browser } from '@tabsnap/schema';
 export const FIREFOX_COMPANION_DATA_PERMISSION = 'browsingActivity';
 
 interface FirefoxDataCollectionPermissionsApi {
-  request(
-    permissions: { data_collection: string[] },
-    callback: (granted: boolean) => void,
-  ): void;
+  request(permissions: { data_collection: string[] }, callback: (granted: boolean) => void): void;
 }
 
 export async function requestCompanionDataConsent(

@@ -6,12 +6,15 @@ import {
 } from './companion-consent.js';
 
 describe('companion data consent', () => {
-  it.each(['chrome', 'edge'] as const)('does not request Mozilla data consent in %s', async (browser) => {
-    const request = vi.fn();
+  it.each(['chrome', 'edge'] as const)(
+    'does not request Mozilla data consent in %s',
+    async (browser) => {
+      const request = vi.fn();
 
-    await expect(requestCompanionDataConsent(browser, { request })).resolves.toBe(true);
-    expect(request).not.toHaveBeenCalled();
-  });
+      await expect(requestCompanionDataConsent(browser, { request })).resolves.toBe(true);
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
 
   it('requests optional browsing activity consent in Firefox', async () => {
     const request = vi.fn((permissions, callback: (granted: boolean) => void) => {
