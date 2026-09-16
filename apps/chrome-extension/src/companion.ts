@@ -308,10 +308,7 @@ function encodeBrowserRegistration(registration: CompanionBrowserRegistration): 
   if (!isBrowser(registration.browser)) {
     throw new Error('Invalid companion browser kind.');
   }
-  if (
-    registration.version !== undefined &&
-    !BROWSER_VERSION_PATTERN.test(registration.version)
-  ) {
+  if (registration.version !== undefined && !BROWSER_VERSION_PATTERN.test(registration.version)) {
     throw new Error('Invalid companion browser version.');
   }
   if (!validCapabilities(registration.capabilities)) {

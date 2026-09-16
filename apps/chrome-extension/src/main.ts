@@ -191,10 +191,7 @@ async function startCompanionPresence(
     capabilities: [...registration.capabilities],
   });
 
-  const heartbeatMs = Math.max(
-    5_000,
-    Math.floor((companionStatus.browserLeaseSeconds * 1000) / 3),
-  );
+  const heartbeatMs = Math.max(5_000, Math.floor((companionStatus.browserLeaseSeconds * 1000) / 3));
   companionHeartbeatTimer = window.setInterval(() => {
     void client.heartbeatBrowser(registration.instanceId).catch(async () => {
       try {

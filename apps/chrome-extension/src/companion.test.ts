@@ -131,9 +131,7 @@ describe('CompanionClient', () => {
         );
       } else {
         expect(url).toMatch(/\/v1\/browser\/heartbeat$/u);
-        expect(init?.body).toBe(
-          'tabsnap-browser:v1\n0123456789abcdef0123456789abcdef',
-        );
+        expect(init?.body).toBe('tabsnap-browser:v1\n0123456789abcdef0123456789abcdef');
       }
       return new Response(null, { status: 204 });
     });
