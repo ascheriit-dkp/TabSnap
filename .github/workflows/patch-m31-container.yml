@@ -6,6 +6,7 @@ on:
       - feat/level4-machine-snapshot-container
     paths:
       - .github/workflows/patch-m31-container.yml
+      - .github/scripts/patch-m31-container.py
 
 permissions:
   contents: write
