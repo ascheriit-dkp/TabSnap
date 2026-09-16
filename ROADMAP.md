@@ -136,4 +136,47 @@ Edge, then Firefox.
 
 Whole-machine multi-browser capture and restore.
 
+### M29 — coordination foundation
+
+- ephemeral registry of connected browser instances in the companion
+- Chrome, Edge and Firefox runtime/capability metadata
+- authenticated registration, heartbeat and listing over loopback
+- lease expiry so stale browser instances disappear automatically
+- no tab data, passwords or browser state persisted by the registry
+
+### M30 — coordinated capture
+
+- create whole-machine capture jobs from the companion
+- dispatch capture work only to explicitly connected browser instances
+- collect per-browser encrypted results with partial-failure reporting
+- preserve the rule that the companion cannot decrypt browser workspaces
+
+### M31 — machine snapshot container
+
+- versioned Level 4 container for multiple encrypted browser snapshots
+- machine/browser manifest with bounded metadata
+- atomic storage and validation of the complete bundle
+- forward-compatible handling of missing or unsupported browsers
+
+### M32 — coordinated restore
+
+- map stored browser entries to available Chrome, Edge and Firefox instances
+- dispatch restore work to each target browser
+- preserve cross-browser feature-loss rules
+- explicit partial success, skip and retry semantics
+
+### M33 — whole-machine UX
+
+- companion view of connected browsers and capabilities
+- one capture/restore flow across the machine
+- progress, per-browser errors and retry controls
+- no hidden discovery, background network access or cloud dependency
+
+### M34 — Level 4 hardening
+
+- multi-browser integration and race tests
+- hostile container/protocol tests and resource limits
+- threat-model and privacy documentation update
+- portable release packaging and 1.0 readiness review
+
 `1.0.0` waits until Level 4 is stable.
