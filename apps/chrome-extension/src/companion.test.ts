@@ -110,6 +110,7 @@ describe('CompanionClient', () => {
         authentication: 'session-bearer',
         coordinationVersion: 1,
         browserLeaseSeconds: 30,
+        captureVersion: 1,
       }),
     );
     const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
@@ -117,7 +118,66 @@ describe('CompanionClient', () => {
     await expect(client.status()).resolves.toMatchObject({
       coordinationVersion: 1,
       browserLeaseSeconds: 30,
+      captureVersion: 1,
     });
+  });
+
+  it('polls capture assignments and accepts an empty queue', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          protocolVersion: 1,
+          coordinationVersion: 1,
+          captureVersion: 1,
+          jobId: '11111111111111111111111111111111',
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
+
+    await expect(client.pollCapture('0123456789abcdef0123456789abcdef')).resolves.toEqual({
+      jobId: '11111111111111111111111111111111',
+    });
+    await expect(client.pollCapture('0123456789abcdef0123456789abcdef')).resolves.toBeUndefined();
+
+    for (const call of fetchImpl.mock.calls) {
+      expect(String(call[0])).toMatch(/\/v1\/browser\/capture\/poll$/u);
+      expect(call[1]?.method).toBe('POST');
+      expect(call[1]?.body).toBe('tabsnap-capture:v1\n0123456789abcdef0123456789abcdef');
+    }
+  });
+
+  it('submits opaque coordinated capture bytes and bounded failure codes', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v1/browser/capture/result')) {
+        const headers = new Headers(init?.headers);
+        expect(headers.get('Content-Type')).toBe('application/octet-stream');
+        expect(headers.get('X-TabSnap-Instance')).toBe('0123456789abcdef0123456789abcdef');
+        expect(headers.get('X-TabSnap-Job')).toBe('11111111111111111111111111111111');
+        expect(Array.from(new Uint8Array(init?.body as ArrayBuffer))).toEqual([1, 2, 3, 255]);
+      } else {
+        expect(url).toMatch(/\/v1\/browser\/capture\/failure$/u);
+        expect(init?.body).toBe(
+          'tabsnap-capture:v1\n0123456789abcdef0123456789abcdef\n11111111111111111111111111111111\npassword-required',
+        );
+      }
+      return new Response(null, { status: 204 });
+    });
+    const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
+
+    await client.submitCaptureResult(
+      '0123456789abcdef0123456789abcdef',
+      '11111111111111111111111111111111',
+      new Uint8Array([1, 2, 3, 255]),
+    );
+    await client.submitCaptureFailure(
+      '0123456789abcdef0123456789abcdef',
+      '11111111111111111111111111111111',
+      'password-required',
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('registers browser presence and sends heartbeats', async () => {

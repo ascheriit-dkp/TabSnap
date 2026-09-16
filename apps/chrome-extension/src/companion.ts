@@ -2,14 +2,17 @@ import type { Browser } from '@tabsnap/schema';
 
 export const COMPANION_PROTOCOL_VERSION = 1;
 export const COMPANION_COORDINATION_VERSION = 1;
+export const COMPANION_CAPTURE_VERSION = 1;
 export const COMPANION_ORIGIN_PERMISSION = 'http://127.0.0.1/*';
 export const MAX_COMPANION_SNAPSHOT_BYTES = 65 * 1024 * 1024;
 export const MAX_COMPANION_BROWSER_INSTANCES = 32;
 
 const PAIRING_PREFIX = `tabsnap-companion:v${COMPANION_PROTOCOL_VERSION}:`;
 const BROWSER_WIRE_PREFIX = `tabsnap-browser:v${COMPANION_COORDINATION_VERSION}`;
+const CAPTURE_WIRE_PREFIX = `tabsnap-capture:v${COMPANION_CAPTURE_VERSION}`;
 const SESSION_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
 const BROWSER_INSTANCE_ID_PATTERN = /^[0-9a-f]{32}$/u;
+const CAPTURE_JOB_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const BROWSER_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/u;
 const DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -24,6 +27,7 @@ export interface CompanionStatus {
   authentication: string;
   coordinationVersion?: number;
   browserLeaseSeconds?: number;
+  captureVersion?: number;
 }
 
 export type CompanionBrowserCapability = 'capture' | 'restore';
@@ -36,6 +40,12 @@ export interface CompanionBrowserRegistration {
 }
 
 export type CompanionBrowserEntry = CompanionBrowserRegistration;
+
+export interface CompanionCaptureAssignment {
+  jobId: string;
+}
+
+export type CompanionCaptureFailure = 'password-required' | 'capture-failed' | 'encryption-failed';
 
 export interface CompanionSnapshotEntry {
   name: string;
@@ -117,7 +127,11 @@ export class CompanionClient {
 
     const coordinationVersion = payload.coordinationVersion;
     const browserLeaseSeconds = payload.browserLeaseSeconds;
+    const captureVersion = payload.captureVersion;
     if (coordinationVersion === undefined && browserLeaseSeconds === undefined) {
+      if (captureVersion !== undefined) {
+        throw new Error('Companion capture status is incompatible.');
+      }
       return { protocolVersion, transport, authentication };
     }
     if (
@@ -125,7 +139,8 @@ export class CompanionClient {
       typeof browserLeaseSeconds !== 'number' ||
       !Number.isSafeInteger(browserLeaseSeconds) ||
       browserLeaseSeconds < 5 ||
-      browserLeaseSeconds > 300
+      browserLeaseSeconds > 300 ||
+      (captureVersion !== undefined && captureVersion !== COMPANION_CAPTURE_VERSION)
     ) {
       throw new Error('Companion coordination status is incompatible.');
     }
@@ -136,6 +151,7 @@ export class CompanionClient {
       authentication,
       coordinationVersion,
       browserLeaseSeconds,
+      ...(captureVersion === undefined ? {} : { captureVersion }),
     };
   }
 
@@ -156,6 +172,70 @@ export class CompanionClient {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
       body: `${BROWSER_WIRE_PREFIX}\n${instanceId}`,
+    });
+  }
+
+  async pollCapture(instanceId: string): Promise<CompanionCaptureAssignment | undefined> {
+    assertBrowserInstanceId(instanceId);
+    const response = await this.#request('/v1/browser/capture/poll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: `${CAPTURE_WIRE_PREFIX}\n${instanceId}`,
+    });
+    if (response.status === 204) return undefined;
+
+    const payload = await parseJsonObject(
+      response,
+      'Companion returned an invalid capture assignment.',
+    );
+    if (
+      payload.protocolVersion !== COMPANION_PROTOCOL_VERSION ||
+      payload.coordinationVersion !== COMPANION_COORDINATION_VERSION ||
+      payload.captureVersion !== COMPANION_CAPTURE_VERSION ||
+      typeof payload.jobId !== 'string' ||
+      !CAPTURE_JOB_ID_PATTERN.test(payload.jobId)
+    ) {
+      throw new Error('Companion returned an invalid capture assignment.');
+    }
+    return { jobId: payload.jobId };
+  }
+
+  async submitCaptureResult(
+    instanceId: string,
+    jobId: string,
+    encryptedBytes: Uint8Array,
+  ): Promise<void> {
+    assertBrowserInstanceId(instanceId);
+    assertCaptureJobId(jobId);
+    if (encryptedBytes.byteLength === 0) throw new Error('Encrypted capture result is empty.');
+    if (encryptedBytes.byteLength > MAX_COMPANION_SNAPSHOT_BYTES) {
+      throw new Error('Encrypted capture result exceeds the companion size limit.');
+    }
+
+    await this.#request('/v1/browser/capture/result', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-TabSnap-Instance': instanceId,
+        'X-TabSnap-Job': jobId,
+      },
+      body: copyArrayBuffer(encryptedBytes),
+    });
+  }
+
+  async submitCaptureFailure(
+    instanceId: string,
+    jobId: string,
+    reason: CompanionCaptureFailure,
+  ): Promise<void> {
+    assertBrowserInstanceId(instanceId);
+    assertCaptureJobId(jobId);
+    if (!isCaptureFailure(reason)) throw new Error('Invalid companion capture failure reason.');
+
+    await this.#request('/v1/browser/capture/failure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: `${CAPTURE_WIRE_PREFIX}\n${instanceId}\n${jobId}\n${reason}`,
     });
   }
 
@@ -301,6 +381,18 @@ export function createCompanionBrowserInstanceId(
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function assertBrowserInstanceId(instanceId: string): void {
+  if (!BROWSER_INSTANCE_ID_PATTERN.test(instanceId)) {
+    throw new Error('Invalid companion browser instance id.');
+  }
+}
+
+function assertCaptureJobId(jobId: string): void {
+  if (!CAPTURE_JOB_ID_PATTERN.test(jobId)) {
+    throw new Error('Invalid companion capture job id.');
+  }
+}
+
 function encodeBrowserRegistration(registration: CompanionBrowserRegistration): string {
   if (!BROWSER_INSTANCE_ID_PATTERN.test(registration.instanceId)) {
     throw new Error('Invalid companion browser instance id.');
@@ -348,6 +440,12 @@ function parseBrowserEntry(value: unknown): CompanionBrowserEntry {
 
 function isBrowser(value: unknown): value is Browser {
   return value === 'chrome' || value === 'edge' || value === 'firefox';
+}
+
+function isCaptureFailure(value: unknown): value is CompanionCaptureFailure {
+  return (
+    value === 'password-required' || value === 'capture-failed' || value === 'encryption-failed'
+  );
 }
 
 function isBrowserCapability(value: unknown): value is CompanionBrowserCapability {

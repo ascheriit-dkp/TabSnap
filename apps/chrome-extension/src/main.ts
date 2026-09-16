@@ -3,6 +3,7 @@ import {
   encryptSnapshot,
   exportSnapshotString,
   importSnapshotString,
+  MIN_PASSWORD_LENGTH,
 } from '@tabsnap/crypto';
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 
@@ -15,10 +16,12 @@ import {
 import { requestCompanionDataConsent } from './companion-consent.js';
 import {
   CompanionClient,
+  COMPANION_CAPTURE_VERSION,
   COMPANION_COORDINATION_VERSION,
   COMPANION_ORIGIN_PERMISSION,
   createCompanionBrowserInstanceId,
   parseCompanionPairingCode,
+  type CompanionCaptureFailure,
 } from './companion.js';
 import { assessCrossBrowserCompatibility } from './cross-browser.js';
 import './style.css';
@@ -56,7 +59,28 @@ const companionLoadButton = element<HTMLButtonElement>('companion-load');
 let currentSnapshot: TabSnapSnapshot | undefined;
 let companionClient: CompanionClient | undefined;
 let companionHeartbeatTimer: number | undefined;
+let companionCaptureTimer: number | undefined;
+let companionBrowserInstanceId: string | undefined;
+let companionCaptureInFlight = false;
 let busy = false;
+
+const COMPANION_CAPTURE_POLL_MS = 1_500;
+
+type PendingCaptureOutcome =
+  | {
+      kind: 'result';
+      instanceId: string;
+      jobId: string;
+      encrypted: Uint8Array;
+    }
+  | {
+      kind: 'failure';
+      instanceId: string;
+      jobId: string;
+      reason: CompanionCaptureFailure;
+    };
+
+let companionPendingCaptureOutcome: PendingCaptureOutcome | undefined;
 
 function syncButtons(): void {
   const hasSnapshot = currentSnapshot !== undefined;
@@ -165,6 +189,148 @@ function stopCompanionPresence(): void {
     window.clearInterval(companionHeartbeatTimer);
     companionHeartbeatTimer = undefined;
   }
+  if (companionCaptureTimer !== undefined) {
+    window.clearInterval(companionCaptureTimer);
+    companionCaptureTimer = undefined;
+  }
+  companionBrowserInstanceId = undefined;
+  companionPendingCaptureOutcome = undefined;
+}
+
+async function submitPendingCaptureOutcome(
+  client: CompanionClient,
+  outcome: PendingCaptureOutcome,
+): Promise<void> {
+  if (outcome.kind === 'result') {
+    await client.submitCaptureResult(outcome.instanceId, outcome.jobId, outcome.encrypted);
+  } else {
+    await client.submitCaptureFailure(outcome.instanceId, outcome.jobId, outcome.reason);
+  }
+}
+
+async function pollCompanionCapture(client: CompanionClient, instanceId: string): Promise<void> {
+  if (companionCaptureInFlight || busy || companionBrowserInstanceId !== instanceId) return;
+  companionCaptureInFlight = true;
+  let claimed = false;
+
+  try {
+    const pending = companionPendingCaptureOutcome;
+    if (pending !== undefined && pending.instanceId === instanceId) {
+      await submitPendingCaptureOutcome(client, pending);
+      if (companionBrowserInstanceId === instanceId && companionPendingCaptureOutcome === pending) {
+        companionPendingCaptureOutcome = undefined;
+        setStatus(
+          pending.kind === 'result'
+            ? `Whole-machine capture ${pending.jobId} submitted as encrypted bytes.`
+            : `Whole-machine capture ${pending.jobId} failure reported to the companion.`,
+          pending.kind === 'result' ? 'success' : 'info',
+        );
+      }
+      return;
+    }
+
+    const assignment = await client.pollCapture(instanceId);
+    if (assignment === undefined || companionBrowserInstanceId !== instanceId) return;
+
+    claimed = true;
+    busy = true;
+    syncButtons();
+    setStatus(`Whole-machine capture ${assignment.jobId}: capturing this browser…`);
+
+    const capturePassword = password();
+    let outcome: PendingCaptureOutcome;
+    if (capturePassword.length < MIN_PASSWORD_LENGTH) {
+      outcome = {
+        kind: 'failure',
+        instanceId,
+        jobId: assignment.jobId,
+        reason: 'password-required',
+      };
+    } else {
+      let snapshot: TabSnapSnapshot;
+      try {
+        snapshot = await captureWorkspace();
+      } catch {
+        outcome = {
+          kind: 'failure',
+          instanceId,
+          jobId: assignment.jobId,
+          reason: 'capture-failed',
+        };
+        if (companionBrowserInstanceId !== instanceId) return;
+        companionPendingCaptureOutcome = outcome;
+        try {
+          await submitPendingCaptureOutcome(client, outcome);
+          if (companionPendingCaptureOutcome === outcome) {
+            companionPendingCaptureOutcome = undefined;
+          }
+        } catch {
+          // Retry the bounded failure report from memory on the next poll tick.
+        }
+        setStatus(
+          `Whole-machine capture ${assignment.jobId} failed while reading this browser.`,
+          'error',
+        );
+        return;
+      }
+
+      try {
+        outcome = {
+          kind: 'result',
+          instanceId,
+          jobId: assignment.jobId,
+          encrypted: await encryptSnapshot(snapshot, capturePassword),
+        };
+      } catch {
+        outcome = {
+          kind: 'failure',
+          instanceId,
+          jobId: assignment.jobId,
+          reason: 'encryption-failed',
+        };
+      }
+    }
+
+    if (companionBrowserInstanceId !== instanceId) return;
+    companionPendingCaptureOutcome = outcome;
+    try {
+      await submitPendingCaptureOutcome(client, outcome);
+      if (companionPendingCaptureOutcome === outcome) {
+        companionPendingCaptureOutcome = undefined;
+      }
+      if (outcome.kind === 'result') {
+        setStatus(
+          `Whole-machine capture ${assignment.jobId} completed for this browser. Only encrypted bytes were sent to the companion.`,
+          'success',
+        );
+      } else if (outcome.reason === 'password-required') {
+        setStatus(
+          'Whole-machine capture needs an encryption password in this browser page. Start a new capture job after entering it.',
+          'info',
+        );
+      } else {
+        setStatus(
+          `Whole-machine capture ${assignment.jobId} could not encrypt this browser workspace.`,
+          'error',
+        );
+      }
+    } catch {
+      setStatus(
+        outcome.kind === 'result'
+          ? 'Encrypted whole-machine capture result is held in memory and will retry submission.'
+          : 'Whole-machine capture failure report is held in memory and will retry submission.',
+        'info',
+      );
+    }
+  } catch {
+    // Polling failures are transient. Heartbeats and snapshot-library mode stay independent.
+  } finally {
+    if (claimed) {
+      busy = false;
+      syncButtons();
+    }
+    companionCaptureInFlight = false;
+  }
 }
 
 async function startCompanionPresence(
@@ -190,6 +356,7 @@ async function startCompanionPresence(
     ...registration,
     capabilities: [...registration.capabilities],
   });
+  companionBrowserInstanceId = registration.instanceId;
 
   const heartbeatMs = Math.max(5_000, Math.floor((companionStatus.browserLeaseSeconds * 1000) / 3));
   companionHeartbeatTimer = window.setInterval(() => {
@@ -204,6 +371,13 @@ async function startCompanionPresence(
       }
     });
   }, heartbeatMs);
+
+  if (companionStatus.captureVersion === COMPANION_CAPTURE_VERSION) {
+    companionCaptureTimer = window.setInterval(() => {
+      void pollCompanionCapture(client, registration.instanceId);
+    }, COMPANION_CAPTURE_POLL_MS);
+    void pollCompanionCapture(client, registration.instanceId);
+  }
   return true;
 }
 
@@ -391,8 +565,13 @@ companionConnectButton.addEventListener('click', () => {
     companionClient = client;
     companionPairing.value = '';
     await refreshCompanionLibrary(client);
+    const captureActive = companionStatus.captureVersion === COMPANION_CAPTURE_VERSION;
     const coordinationNote = coordinationActive
-      ? ' This browser is registered ephemerally for whole-machine coordination.'
+      ? ` This browser is registered ephemerally for whole-machine coordination.${
+          captureActive
+            ? ' Coordinated capture polling is active while this page stays open.'
+            : ' This companion does not advertise coordinated capture yet.'
+        }`
       : ' This companion does not advertise whole-machine coordination; snapshot-library mode still works.';
     setStatus(
       browser === 'firefox'
