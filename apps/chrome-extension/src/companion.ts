@@ -35,7 +35,7 @@ export interface CompanionBrowserRegistration {
   capabilities: CompanionBrowserCapability[];
 }
 
-export interface CompanionBrowserEntry extends CompanionBrowserRegistration {}
+export type CompanionBrowserEntry = CompanionBrowserRegistration;
 
 export interface CompanionSnapshotEntry {
   name: string;
