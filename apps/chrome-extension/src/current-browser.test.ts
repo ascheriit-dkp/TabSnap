@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { currentBrowser } from './browser.js';
+import { currentBrowser, currentBrowserRuntime } from './browser.js';
 
 describe('current browser target', () => {
   it('detects Chrome', () => {
@@ -17,6 +17,14 @@ describe('current browser target', () => {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0',
       ),
     ).toBe('edge');
+  });
+
+  it('exposes runtime version for coordination metadata', () => {
+    expect(
+      currentBrowserRuntime(
+        'Mozilla/5.0 AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36 Edg/140.0.3485.54',
+      ),
+    ).toMatchObject({ browser: 'edge', version: '140.0.3485.54' });
   });
 
   it('detects Firefox', () => {

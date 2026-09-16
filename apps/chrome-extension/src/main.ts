@@ -6,11 +6,18 @@ import {
 } from '@tabsnap/crypto';
 import type { TabSnapSnapshot } from '@tabsnap/schema';
 
-import { captureWorkspace, currentBrowser, restoreWorkspace } from './browser.js';
+import {
+  captureWorkspace,
+  currentBrowser,
+  currentBrowserRuntime,
+  restoreWorkspace,
+} from './browser.js';
 import { requestCompanionDataConsent } from './companion-consent.js';
 import {
   CompanionClient,
+  COMPANION_COORDINATION_VERSION,
   COMPANION_ORIGIN_PERMISSION,
+  createCompanionBrowserInstanceId,
   parseCompanionPairingCode,
 } from './companion.js';
 import { assessCrossBrowserCompatibility } from './cross-browser.js';
@@ -48,6 +55,7 @@ const companionLoadButton = element<HTMLButtonElement>('companion-load');
 
 let currentSnapshot: TabSnapSnapshot | undefined;
 let companionClient: CompanionClient | undefined;
+let companionHeartbeatTimer: number | undefined;
 let busy = false;
 
 function syncButtons(): void {
@@ -150,6 +158,56 @@ function downloadSnapshot(bytes: Uint8Array, snapshot: TabSnapSnapshot): void {
 function requireCompanion(): CompanionClient {
   if (companionClient === undefined) throw new Error('Connect the portable companion first.');
   return companionClient;
+}
+
+function stopCompanionPresence(): void {
+  if (companionHeartbeatTimer !== undefined) {
+    window.clearInterval(companionHeartbeatTimer);
+    companionHeartbeatTimer = undefined;
+  }
+}
+
+async function startCompanionPresence(
+  client: CompanionClient,
+  companionStatus: Awaited<ReturnType<CompanionClient['status']>>,
+): Promise<boolean> {
+  stopCompanionPresence();
+  if (
+    companionStatus.coordinationVersion !== COMPANION_COORDINATION_VERSION ||
+    companionStatus.browserLeaseSeconds === undefined
+  ) {
+    return false;
+  }
+
+  const runtime = currentBrowserRuntime();
+  const registration = {
+    instanceId: createCompanionBrowserInstanceId(),
+    browser: runtime.browser,
+    ...(runtime.version === undefined ? {} : { version: runtime.version }),
+    capabilities: ['capture', 'restore'] as const,
+  };
+  await client.registerBrowser({
+    ...registration,
+    capabilities: [...registration.capabilities],
+  });
+
+  const heartbeatMs = Math.max(
+    5_000,
+    Math.floor((companionStatus.browserLeaseSeconds * 1000) / 3),
+  );
+  companionHeartbeatTimer = window.setInterval(() => {
+    void client.heartbeatBrowser(registration.instanceId).catch(async () => {
+      try {
+        await client.registerBrowser({
+          ...registration,
+          capabilities: [...registration.capabilities],
+        });
+      } catch {
+        // A later heartbeat retries. Snapshot-library operations stay independent.
+      }
+    });
+  }, heartbeatMs);
+  return true;
 }
 
 async function refreshCompanionLibrary(client: CompanionClient): Promise<void> {
@@ -332,19 +390,24 @@ companionConnectButton.addEventListener('click', () => {
       throw new Error('Connected process is not a compatible TabSnap companion.');
     }
 
+    const coordinationActive = await startCompanionPresence(client, companionStatus);
     companionClient = client;
     companionPairing.value = '';
     await refreshCompanionLibrary(client);
+    const coordinationNote = coordinationActive
+      ? ' This browser is registered ephemerally for whole-machine coordination.'
+      : ' This companion does not advertise whole-machine coordination; snapshot-library mode still works.';
     setStatus(
       browser === 'firefox'
-        ? 'Portable companion connected for this page session. Firefox data transmission consent and loopback access are enabled for companion mode. The pairing token is kept in memory only.'
-        : 'Portable companion connected for this page session. The pairing token is kept in memory only.',
+        ? `Portable companion connected for this page session. Firefox data transmission consent and loopback access are enabled for companion mode. The pairing token is kept in memory only.${coordinationNote}`
+        : `Portable companion connected for this page session. The pairing token is kept in memory only.${coordinationNote}`,
       'success',
     );
   });
 });
 
 companionDisconnectButton.addEventListener('click', () => {
+  stopCompanionPresence();
   companionClient = undefined;
   companionPairing.value = '';
   clearCompanionLibrary();
