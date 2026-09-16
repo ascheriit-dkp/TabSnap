@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CompanionClient,
   MAX_COMPANION_SNAPSHOT_BYTES,
+  createCompanionBrowserInstanceId,
   parseCompanionPairingCode,
 } from './companion.js';
 
@@ -99,6 +100,83 @@ describe('CompanionClient', () => {
     const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
 
     await expect(client.status()).rejects.toThrow('incompatible');
+  });
+
+  it('accepts and validates coordination status', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        protocolVersion: 1,
+        transport: 'loopback-http',
+        authentication: 'session-bearer',
+        coordinationVersion: 1,
+        browserLeaseSeconds: 30,
+      }),
+    );
+    const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
+
+    await expect(client.status()).resolves.toMatchObject({
+      coordinationVersion: 1,
+      browserLeaseSeconds: 30,
+    });
+  });
+
+  it('registers browser presence and sends heartbeats', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      expect(init?.method).toBe('POST');
+      expect(new Headers(init?.headers).get('Content-Type')).toContain('text/plain');
+      if (url.endsWith('/v1/browser/register')) {
+        expect(init?.body).toBe(
+          'tabsnap-browser:v1\n0123456789abcdef0123456789abcdef\nfirefox\n143.0\ncapture,restore',
+        );
+      } else {
+        expect(url).toMatch(/\/v1\/browser\/heartbeat$/u);
+        expect(init?.body).toBe('tabsnap-browser:v1\n0123456789abcdef0123456789abcdef');
+      }
+      return new Response(null, { status: 204 });
+    });
+    const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
+
+    await client.registerBrowser({
+      instanceId: '0123456789abcdef0123456789abcdef',
+      browser: 'firefox',
+      version: '143.0',
+      capabilities: ['capture', 'restore'],
+    });
+    await client.heartbeatBrowser('0123456789abcdef0123456789abcdef');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('lists validated connected browsers', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        protocolVersion: 1,
+        coordinationVersion: 1,
+        browserLeaseSeconds: 30,
+        browsers: [
+          {
+            instanceId: '0123456789abcdef0123456789abcdef',
+            browser: 'edge',
+            version: '140.0.0.0',
+            capabilities: ['capture', 'restore'],
+          },
+        ],
+      }),
+    );
+    const client = new CompanionClient(parseCompanionPairingCode(PAIRING), { fetchImpl });
+
+    await expect(client.listBrowsers()).resolves.toEqual([
+      {
+        instanceId: '0123456789abcdef0123456789abcdef',
+        browser: 'edge',
+        version: '140.0.0.0',
+        capabilities: ['capture', 'restore'],
+      },
+    ]);
+  });
+
+  it('creates a random 128-bit browser instance id', () => {
+    expect(createCompanionBrowserInstanceId()).toMatch(/^[0-9a-f]{32}$/u);
   });
 
   it('lists validated library entries', async () => {

@@ -1,3 +1,4 @@
+pub mod coordination;
 pub mod library;
 pub mod protocol;
 pub mod ui;

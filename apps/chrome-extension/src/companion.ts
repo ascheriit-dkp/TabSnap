@@ -1,9 +1,16 @@
+import type { Browser } from '@tabsnap/schema';
+
 export const COMPANION_PROTOCOL_VERSION = 1;
+export const COMPANION_COORDINATION_VERSION = 1;
 export const COMPANION_ORIGIN_PERMISSION = 'http://127.0.0.1/*';
 export const MAX_COMPANION_SNAPSHOT_BYTES = 65 * 1024 * 1024;
+export const MAX_COMPANION_BROWSER_INSTANCES = 32;
 
 const PAIRING_PREFIX = `tabsnap-companion:v${COMPANION_PROTOCOL_VERSION}:`;
+const BROWSER_WIRE_PREFIX = `tabsnap-browser:v${COMPANION_COORDINATION_VERSION}`;
 const SESSION_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
+const BROWSER_INSTANCE_ID_PATTERN = /^[0-9a-f]{32}$/u;
+const BROWSER_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/u;
 const DEFAULT_TIMEOUT_MS = 5_000;
 
 export interface CompanionPairing {
@@ -15,7 +22,20 @@ export interface CompanionStatus {
   protocolVersion: number;
   transport: string;
   authentication: string;
+  coordinationVersion?: number;
+  browserLeaseSeconds?: number;
 }
+
+export type CompanionBrowserCapability = 'capture' | 'restore';
+
+export interface CompanionBrowserRegistration {
+  instanceId: string;
+  browser: Browser;
+  version?: string;
+  capabilities: CompanionBrowserCapability[];
+}
+
+export type CompanionBrowserEntry = CompanionBrowserRegistration;
 
 export interface CompanionSnapshotEntry {
   name: string;
@@ -95,7 +115,63 @@ export class CompanionClient {
       throw new Error('Companion protocol status is incompatible.');
     }
 
-    return { protocolVersion, transport, authentication };
+    const coordinationVersion = payload.coordinationVersion;
+    const browserLeaseSeconds = payload.browserLeaseSeconds;
+    if (coordinationVersion === undefined && browserLeaseSeconds === undefined) {
+      return { protocolVersion, transport, authentication };
+    }
+    if (
+      coordinationVersion !== COMPANION_COORDINATION_VERSION ||
+      typeof browserLeaseSeconds !== 'number' ||
+      !Number.isSafeInteger(browserLeaseSeconds) ||
+      browserLeaseSeconds < 5 ||
+      browserLeaseSeconds > 300
+    ) {
+      throw new Error('Companion coordination status is incompatible.');
+    }
+
+    return {
+      protocolVersion,
+      transport,
+      authentication,
+      coordinationVersion,
+      browserLeaseSeconds,
+    };
+  }
+
+  async registerBrowser(registration: CompanionBrowserRegistration): Promise<void> {
+    const body = encodeBrowserRegistration(registration);
+    await this.#request('/v1/browser/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body,
+    });
+  }
+
+  async heartbeatBrowser(instanceId: string): Promise<void> {
+    if (!BROWSER_INSTANCE_ID_PATTERN.test(instanceId)) {
+      throw new Error('Invalid companion browser instance id.');
+    }
+    await this.#request('/v1/browser/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: `${BROWSER_WIRE_PREFIX}\n${instanceId}`,
+    });
+  }
+
+  async listBrowsers(): Promise<CompanionBrowserEntry[]> {
+    const response = await this.#request('/v1/browsers');
+    const payload = await parseJsonObject(response, 'Companion returned an invalid browser list.');
+    if (
+      payload.protocolVersion !== COMPANION_PROTOCOL_VERSION ||
+      payload.coordinationVersion !== COMPANION_COORDINATION_VERSION ||
+      !Array.isArray(payload.browsers) ||
+      payload.browsers.length > MAX_COMPANION_BROWSER_INSTANCES
+    ) {
+      throw new Error('Companion browser list is incompatible.');
+    }
+
+    return payload.browsers.map(parseBrowserEntry);
   }
 
   async listSnapshots(): Promise<CompanionSnapshotEntry[]> {
@@ -215,6 +291,72 @@ export class CompanionClient {
       clearTimeout(timeout);
     }
   }
+}
+
+export function createCompanionBrowserInstanceId(
+  cryptoImpl: Pick<Crypto, 'getRandomValues'> = globalThis.crypto,
+): string {
+  const bytes = new Uint8Array(16);
+  cryptoImpl.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function encodeBrowserRegistration(registration: CompanionBrowserRegistration): string {
+  if (!BROWSER_INSTANCE_ID_PATTERN.test(registration.instanceId)) {
+    throw new Error('Invalid companion browser instance id.');
+  }
+  if (!isBrowser(registration.browser)) {
+    throw new Error('Invalid companion browser kind.');
+  }
+  if (registration.version !== undefined && !BROWSER_VERSION_PATTERN.test(registration.version)) {
+    throw new Error('Invalid companion browser version.');
+  }
+  if (!validCapabilities(registration.capabilities)) {
+    throw new Error('Invalid companion browser capabilities.');
+  }
+
+  return [
+    BROWSER_WIRE_PREFIX,
+    registration.instanceId,
+    registration.browser,
+    registration.version ?? '-',
+    registration.capabilities.join(','),
+  ].join('\n');
+}
+
+function parseBrowserEntry(value: unknown): CompanionBrowserEntry {
+  if (!isRecord(value)) throw new Error('Companion returned an invalid browser entry.');
+  const { instanceId, browser, version, capabilities } = value;
+  if (
+    typeof instanceId !== 'string' ||
+    !BROWSER_INSTANCE_ID_PATTERN.test(instanceId) ||
+    !isBrowser(browser) ||
+    !Array.isArray(capabilities) ||
+    !validCapabilities(capabilities) ||
+    !(version === null || (typeof version === 'string' && BROWSER_VERSION_PATTERN.test(version)))
+  ) {
+    throw new Error('Companion returned an invalid browser entry.');
+  }
+
+  return {
+    instanceId,
+    browser,
+    ...(version === null ? {} : { version }),
+    capabilities,
+  };
+}
+
+function isBrowser(value: unknown): value is Browser {
+  return value === 'chrome' || value === 'edge' || value === 'firefox';
+}
+
+function isBrowserCapability(value: unknown): value is CompanionBrowserCapability {
+  return value === 'capture' || value === 'restore';
+}
+
+function validCapabilities(value: unknown[]): value is CompanionBrowserCapability[] {
+  if (value.length === 0 || value.length > 2 || !value.every(isBrowserCapability)) return false;
+  return new Set(value).size === value.length;
 }
 
 function copyArrayBuffer(bytes: Uint8Array): ArrayBuffer {

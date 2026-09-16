@@ -3,12 +3,16 @@ import type { Browser, TabSnapSnapshot } from '@tabsnap/schema';
 import { chromiumAdapter } from './chromium-adapter.js';
 import { detectChromiumRuntime } from './chromium-runtime.js';
 import { firefoxAdapter } from './firefox-adapter.js';
-import { isFirefoxUserAgent } from './firefox-runtime.js';
-import type { BrowserAdapter, RestoreReport } from './webextension-adapter.js';
+import { detectFirefoxRuntime, isFirefoxUserAgent } from './firefox-runtime.js';
+import type { BrowserAdapter, BrowserRuntime, RestoreReport } from './webextension-adapter.js';
+
+export function currentBrowserRuntime(userAgent = navigator.userAgent): BrowserRuntime {
+  if (isFirefoxUserAgent(userAgent)) return detectFirefoxRuntime(userAgent);
+  return detectChromiumRuntime(userAgent);
+}
 
 export function currentBrowser(userAgent = navigator.userAgent): Browser {
-  if (isFirefoxUserAgent(userAgent)) return 'firefox';
-  return detectChromiumRuntime(userAgent).browser;
+  return currentBrowserRuntime(userAgent).browser;
 }
 
 function currentAdapter(userAgent = navigator.userAgent): BrowserAdapter {
