@@ -8,20 +8,23 @@ Capture windows and tabs, encrypt the snapshot, move it yourself, restore it som
 
 ## Rules
 
-- snapshot data stays local
+- snapshot data stays local in extension-only mode
 - no telemetry
 - no analytics
 - no page content, cookies or history
 - no password storage
 - restore is non-destructive by default
+- optional companion traffic is encrypted and loopback-only
 
 ## Status
 
-`0.1.0-beta.1` is the Level 1 Chrome beta. It captures, encrypts, exports, imports and restores browser workspaces locally.
+`v0.3.0-alpha.3` is the current Level 3 prerelease.
 
-Clicking the TabSnap toolbar action opens a persistent extension page, so capture, Argon2id encryption, decryption and restore are no longer tied to the lifetime of a browser popup.
+Chrome, Microsoft Edge and Firefox can capture and restore browser workspaces using the same `.tabsnap` format. Chrome ↔ Edge restore is supported through the shared Chromium implementation. Chromium ↔ Firefox restore is best-effort and reports known browser-specific tabs before restore.
 
-See the [roadmap](./ROADMAP.md), [Chrome guide](./docs/guide/chrome-extension.md) and [product spec](./docs/product-spec.md).
+The optional portable Windows companion stores opaque encrypted snapshots locally or on removable storage. Extension-only mode does not require it.
+
+Store submission preparation is in progress. See the [roadmap](./ROADMAP.md), [guides](./docs/guide/), [privacy policy](./docs/privacy.md) and [product spec](./docs/product-spec.md).
 
 ## Development
 
@@ -31,13 +34,20 @@ pnpm check
 pnpm docs:dev
 ```
 
-Build the unpacked Chrome extension with:
+Build Chromium:
 
 ```bash
 pnpm extension:build
 ```
 
-Then load `apps/chrome-extension/dist` from `chrome://extensions` with Developer mode enabled.
+Build and validate Firefox:
+
+```bash
+pnpm extension:build
+pnpm extension:firefox-build
+pnpm extension:firefox-audit
+pnpm extension:firefox-lint
+```
 
 Node 24+.
 
