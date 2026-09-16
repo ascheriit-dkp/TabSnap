@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "pnpm extension:build && pnpm docs:build",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm extension:build && pnpm extension:audit && pnpm extension:edge-audit && pnpm extension:firefox-build && pnpm extension:firefox-audit && pnpm extension:firefox-lint && pnpm docs:build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm extension:build && pnpm extension:audit && pnpm extension:edge-audit && pnpm extension:firefox-build && pnpm extension:firefox-audit && pnpm extension:firefox-lint && pnpm store:audit && pnpm docs:build",
     "docs:build": "vitepress build docs",
     "docs:dev": "vitepress docs",
     "docs:preview": "vitepress preview docs",
@@ -23,6 +23,7 @@
     "extension:build": "pnpm --filter @tabsnap/chrome-extension build",
     "extension:dev": "pnpm --filter @tabsnap/chrome-extension dev",
     "extension:e2e": "playwright test --config=playwright.config.ts",
+    "store:audit": "node scripts/audit-store-readiness.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
