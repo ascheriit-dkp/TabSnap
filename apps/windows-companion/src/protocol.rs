@@ -3,12 +3,17 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::capture::{
+    CAPTURE_VERSION, CaptureFailure, CaptureJobError, CaptureJobStatus, CaptureJobStore,
+    MAX_CAPTURE_RESULT_BYTES, valid_job_id,
+};
 use crate::coordination::{
-    BROWSER_LEASE_SECONDS, BrowserCapability, BrowserKind, BrowserRegistration, BrowserRegistry,
-    COORDINATION_VERSION, HeartbeatResult, RegistryError, valid_instance_id,
+    AuthorizationResult, BROWSER_LEASE_SECONDS, BrowserCapability, BrowserKind,
+    BrowserRegistration, BrowserRegistry, COORDINATION_VERSION, HeartbeatResult, RegistryError,
+    valid_instance_id,
 };
 use crate::library::{MAX_SNAPSHOT_FILE_BYTES, SnapshotLibrary};
 
@@ -19,6 +24,7 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 const CHROME_EXTENSION_PREFIX: &str = "chrome-extension://";
 const FIREFOX_EXTENSION_PREFIX: &str = "moz-extension://";
 const BROWSER_WIRE_PREFIX: &str = "tabsnap-browser:v1";
+const CAPTURE_WIRE_PREFIX: &str = "tabsnap-capture:v1";
 const MAX_COORDINATION_BODY_BYTES: u64 = 1024;
 
 #[derive(Debug)]
@@ -26,7 +32,49 @@ pub struct ProtocolServer {
     listener: TcpListener,
     library: SnapshotLibrary,
     token: String,
-    registry: Mutex<BrowserRegistry>,
+    registry: Arc<Mutex<BrowserRegistry>>,
+    capture_jobs: Arc<Mutex<CaptureJobStore>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CaptureControl {
+    registry: Arc<Mutex<BrowserRegistry>>,
+    capture_jobs: Arc<Mutex<CaptureJobStore>>,
+}
+
+impl CaptureControl {
+    pub fn create_capture_job(&self) -> io::Result<CaptureJobStatus> {
+        let now = Instant::now();
+        let instances = self
+            .registry
+            .lock()
+            .map_err(|_| io::Error::other("Browser registry is unavailable."))?
+            .active(now);
+        let mut jobs = self
+            .capture_jobs
+            .lock()
+            .map_err(|_| io::Error::other("Capture job store is unavailable."))?;
+
+        for _ in 0..4 {
+            let job_id = generate_capture_job_id()?;
+            match jobs.create(job_id, instances.clone(), now) {
+                Ok(status) => return Ok(status),
+                Err(CaptureJobError::DuplicateJob) => continue,
+                Err(error) => return Err(capture_control_error(error)),
+            }
+        }
+        Err(io::Error::other(
+            "Unable to allocate a unique capture job id.",
+        ))
+    }
+
+    pub fn capture_job_status(&self, job_id: &str) -> io::Result<Option<CaptureJobStatus>> {
+        let mut jobs = self
+            .capture_jobs
+            .lock()
+            .map_err(|_| io::Error::other("Capture job store is unavailable."))?;
+        Ok(jobs.status(job_id, Instant::now()))
+    }
 }
 
 impl ProtocolServer {
@@ -47,7 +95,8 @@ impl ProtocolServer {
             listener,
             library,
             token,
-            registry: Mutex::new(BrowserRegistry::default()),
+            registry: Arc::new(Mutex::new(BrowserRegistry::default())),
+            capture_jobs: Arc::new(Mutex::new(CaptureJobStore::default())),
         })
     }
 
@@ -61,6 +110,13 @@ impl ProtocolServer {
 
     pub fn session_token(&self) -> &str {
         &self.token
+    }
+
+    pub fn capture_control(&self) -> CaptureControl {
+        CaptureControl {
+            registry: Arc::clone(&self.registry),
+            capture_jobs: Arc::clone(&self.capture_jobs),
+        }
     }
 
     pub fn pairing_code(&self) -> io::Result<String> {
@@ -123,7 +179,7 @@ impl ProtocolServer {
             ("GET", "/v1/status") => HttpResponse::json(
                 200,
                 format!(
-                    "{{\"protocolVersion\":{PROTOCOL_VERSION},\"transport\":\"loopback-http\",\"authentication\":\"session-bearer\",\"coordinationVersion\":{COORDINATION_VERSION},\"browserLeaseSeconds\":{BROWSER_LEASE_SECONDS}}}"
+                    "{{\"protocolVersion\":{PROTOCOL_VERSION},\"transport\":\"loopback-http\",\"authentication\":\"session-bearer\",\"coordinationVersion\":{COORDINATION_VERSION},\"browserLeaseSeconds\":{BROWSER_LEASE_SECONDS},\"captureVersion\":{CAPTURE_VERSION}}}"
                 ),
             ),
             ("GET", "/v1/snapshots") => self.list_snapshots(),
@@ -136,6 +192,15 @@ impl ProtocolServer {
                 self.heartbeat_browser(&request, cors_origin.as_deref())
             }
             ("GET", "/v1/browsers") => self.list_browsers(),
+            ("POST", "/v1/browser/capture/poll") => {
+                self.poll_capture(&request, cors_origin.as_deref())
+            }
+            ("POST", "/v1/browser/capture/result") => {
+                self.submit_capture_result(&request, cors_origin.as_deref())
+            }
+            ("POST", "/v1/browser/capture/failure") => {
+                self.submit_capture_failure(&request, cors_origin.as_deref())
+            }
             _ => HttpResponse::json_error(404, "Unknown protocol endpoint."),
         };
 
@@ -237,6 +302,143 @@ impl ProtocolServer {
                 "{{\"protocolVersion\":{PROTOCOL_VERSION},\"coordinationVersion\":{COORDINATION_VERSION},\"browserLeaseSeconds\":{BROWSER_LEASE_SECONDS},\"browsers\":[{browsers}]}}"
             ),
         )
+    }
+
+    fn poll_capture(&self, request: &HttpRequest, origin: Option<&str>) -> HttpResponse {
+        let Some(origin) = origin else {
+            return HttpResponse::json_error(403, "Capture polling requires an extension origin.");
+        };
+        if !is_text_plain(request) {
+            return HttpResponse::json_error(415, "Capture polling must be text/plain.");
+        }
+        let Some(instance_id) = parse_capture_poll(&request.body) else {
+            return HttpResponse::json_error(400, "Capture poll is invalid.");
+        };
+        if let Err(response) = self.authorize_capture(instance_id, origin) {
+            return response;
+        }
+
+        let Ok(mut jobs) = self.capture_jobs.lock() else {
+            return HttpResponse::json_error(500, "Capture job store is unavailable.");
+        };
+        match jobs.next_assignment(instance_id, Instant::now()) {
+            Some(assignment) => HttpResponse::json(
+                200,
+                format!(
+                    "{{\"protocolVersion\":{PROTOCOL_VERSION},\"coordinationVersion\":{COORDINATION_VERSION},\"captureVersion\":{CAPTURE_VERSION},\"jobId\":{}}}",
+                    json_string(&assignment.job_id)
+                ),
+            ),
+            None => HttpResponse::empty(204),
+        }
+    }
+
+    fn submit_capture_result(&self, request: &HttpRequest, origin: Option<&str>) -> HttpResponse {
+        let Some(origin) = origin else {
+            return HttpResponse::json_error(403, "Capture result requires an extension origin.");
+        };
+        if request.body.is_empty() {
+            return HttpResponse::json_error(400, "Capture result is empty.");
+        }
+        if request
+            .header("content-type")
+            .is_none_or(|value| !value.eq_ignore_ascii_case("application/octet-stream"))
+        {
+            return HttpResponse::json_error(
+                415,
+                "Capture result must be application/octet-stream.",
+            );
+        }
+        let Some(instance_id) = request.header("x-tabsnap-instance") else {
+            return HttpResponse::json_error(400, "X-TabSnap-Instance is required.");
+        };
+        let Some(job_id) = request.header("x-tabsnap-job") else {
+            return HttpResponse::json_error(400, "X-TabSnap-Job is required.");
+        };
+        if !valid_instance_id(instance_id) || !valid_job_id(job_id) {
+            return HttpResponse::json_error(400, "Capture result identifiers are invalid.");
+        }
+        if let Err(response) = self.authorize_capture(instance_id, origin) {
+            return response;
+        }
+
+        let Ok(mut jobs) = self.capture_jobs.lock() else {
+            return HttpResponse::json_error(500, "Capture job store is unavailable.");
+        };
+        match jobs.submit_result(job_id, instance_id, request.body.clone(), Instant::now()) {
+            Ok(()) => HttpResponse::empty(204),
+            Err(CaptureJobError::NotFound | CaptureJobError::TargetNotFound) => {
+                HttpResponse::json_error(404, "Capture job or target was not found.")
+            }
+            Err(CaptureJobError::AlreadyFinished) => {
+                HttpResponse::json_error(409, "Capture target is already finished.")
+            }
+            Err(CaptureJobError::EmptyResult) => {
+                HttpResponse::json_error(400, "Capture result is empty.")
+            }
+            Err(CaptureJobError::ResultTooLarge | CaptureJobError::JobBytesExceeded) => {
+                HttpResponse::json_error(413, "Capture result exceeds the job limit.")
+            }
+            Err(_) => HttpResponse::json_error(400, "Capture result was rejected."),
+        }
+    }
+
+    fn submit_capture_failure(&self, request: &HttpRequest, origin: Option<&str>) -> HttpResponse {
+        let Some(origin) = origin else {
+            return HttpResponse::json_error(403, "Capture failure requires an extension origin.");
+        };
+        if !is_text_plain(request) {
+            return HttpResponse::json_error(415, "Capture failure must be text/plain.");
+        }
+        let Some((instance_id, job_id, reason)) = parse_capture_failure(&request.body) else {
+            return HttpResponse::json_error(400, "Capture failure is invalid.");
+        };
+        if let Err(response) = self.authorize_capture(instance_id, origin) {
+            return response;
+        }
+
+        let Ok(mut jobs) = self.capture_jobs.lock() else {
+            return HttpResponse::json_error(500, "Capture job store is unavailable.");
+        };
+        match jobs.submit_failure(job_id, instance_id, reason, Instant::now()) {
+            Ok(()) => HttpResponse::empty(204),
+            Err(CaptureJobError::NotFound | CaptureJobError::TargetNotFound) => {
+                HttpResponse::json_error(404, "Capture job or target was not found.")
+            }
+            Err(CaptureJobError::AlreadyFinished) => {
+                HttpResponse::json_error(409, "Capture target is already finished.")
+            }
+            Err(_) => HttpResponse::json_error(400, "Capture failure was rejected."),
+        }
+    }
+
+    fn authorize_capture(&self, instance_id: &str, origin: &str) -> Result<(), HttpResponse> {
+        let Ok(mut registry) = self.registry.lock() else {
+            return Err(HttpResponse::json_error(
+                500,
+                "Browser registry is unavailable.",
+            ));
+        };
+        match registry.authorize(
+            instance_id,
+            origin,
+            BrowserCapability::Capture,
+            Instant::now(),
+        ) {
+            AuthorizationResult::Allowed => Ok(()),
+            AuthorizationResult::NotFound => Err(HttpResponse::json_error(
+                404,
+                "Browser instance is not registered.",
+            )),
+            AuthorizationResult::OriginMismatch => Err(HttpResponse::json_error(
+                403,
+                "Browser instance belongs to another extension origin.",
+            )),
+            AuthorizationResult::MissingCapability => Err(HttpResponse::json_error(
+                409,
+                "Browser instance does not advertise capture capability.",
+            )),
+        }
     }
 
     fn authenticated(&self, request: &HttpRequest) -> bool {
@@ -426,7 +628,8 @@ impl HttpResponse {
             ));
             self.headers.push((
                 "Access-Control-Allow-Headers".to_owned(),
-                "Authorization, Content-Type, X-TabSnap-Name".to_owned(),
+                "Authorization, Content-Type, X-TabSnap-Name, X-TabSnap-Instance, X-TabSnap-Job"
+                    .to_owned(),
             ));
             self.headers.push((
                 "Access-Control-Allow-Private-Network".to_owned(),
@@ -527,8 +730,16 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, RequestError> {
             .map_err(|_| RequestError::new(400, "Invalid Content-Length."))?,
         None => 0,
     };
-    let body_limit = if matches!(path, "/v1/browser/register" | "/v1/browser/heartbeat") {
+    let body_limit = if matches!(
+        path,
+        "/v1/browser/register"
+            | "/v1/browser/heartbeat"
+            | "/v1/browser/capture/poll"
+            | "/v1/browser/capture/failure"
+    ) {
         MAX_COORDINATION_BODY_BYTES
+    } else if path == "/v1/browser/capture/result" {
+        MAX_CAPTURE_RESULT_BYTES as u64
     } else {
         MAX_SNAPSHOT_FILE_BYTES
     };
@@ -609,6 +820,9 @@ fn is_protocol_path(path: &str) -> bool {
             | "/v1/browser/register"
             | "/v1/browser/heartbeat"
             | "/v1/browsers"
+            | "/v1/browser/capture/poll"
+            | "/v1/browser/capture/result"
+            | "/v1/browser/capture/failure"
     )
 }
 
@@ -690,6 +904,58 @@ fn parse_browser_heartbeat(body: &[u8]) -> Option<&str> {
         return None;
     }
     Some(parts[1])
+}
+
+fn parse_capture_poll(body: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(body).ok()?;
+    if text.contains('\r') {
+        return None;
+    }
+    let parts = text.split('\n').collect::<Vec<_>>();
+    if parts.len() != 2 || parts[0] != CAPTURE_WIRE_PREFIX || !valid_instance_id(parts[1]) {
+        return None;
+    }
+    Some(parts[1])
+}
+
+fn parse_capture_failure(body: &[u8]) -> Option<(&str, &str, CaptureFailure)> {
+    let text = std::str::from_utf8(body).ok()?;
+    if text.contains('\r') {
+        return None;
+    }
+    let parts = text.split('\n').collect::<Vec<_>>();
+    if parts.len() != 4
+        || parts[0] != CAPTURE_WIRE_PREFIX
+        || !valid_instance_id(parts[1])
+        || !valid_job_id(parts[2])
+    {
+        return None;
+    }
+    Some((parts[1], parts[2], CaptureFailure::parse(parts[3])?))
+}
+
+fn capture_control_error(error: CaptureJobError) -> io::Error {
+    match error {
+        CaptureJobError::NoTargets => io::Error::new(
+            io::ErrorKind::NotFound,
+            "No connected browser advertises capture capability.",
+        ),
+        CaptureJobError::CapacityExceeded => io::Error::other("Capture job capacity is exhausted."),
+        CaptureJobError::InvalidJobId | CaptureJobError::DuplicateJob => {
+            io::Error::other("Unable to allocate capture job.")
+        }
+        _ => io::Error::other("Capture job store rejected the operation."),
+    }
+}
+
+fn generate_capture_job_id() -> io::Result<String> {
+    let mut bytes = [0_u8; 16];
+    fill_random(&mut bytes)?;
+    let mut job_id = String::with_capacity(32);
+    for byte in bytes {
+        job_id.push_str(&format!("{byte:02x}"));
+    }
+    Ok(job_id)
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -1010,6 +1276,80 @@ mod tests {
         assert!(body.contains("\"coordinationVersion\":1"));
         assert!(body.contains("\"browser\":\"firefox\""));
         assert!(body.contains("\"capabilities\":[\"capture\",\"restore\"]"));
+
+        worker.join().unwrap();
+        if root.exists() {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn coordinates_capture_results_and_partial_failures() {
+        let (server, root) = test_server("capture-job");
+        let control = server.capture_control();
+        let address = server.local_addr().unwrap();
+        let worker = thread::spawn(move || server.serve_n(5).unwrap());
+
+        let chrome_body = format!(
+            "{BROWSER_WIRE_PREFIX}\n0123456789abcdef0123456789abcdef\nchrome\n140.0\ncapture,restore"
+        );
+        let chrome_register = format!(
+            "POST /v1/browser/register HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{chrome_body}",
+            chrome_body.len()
+        );
+        assert!(
+            request(address, chrome_register.as_bytes())
+                .starts_with(b"HTTP/1.1 204 No Content\r\n")
+        );
+
+        let firefox_id = "fedcba9876543210fedcba9876543210";
+        let firefox_body =
+            format!("{BROWSER_WIRE_PREFIX}\n{firefox_id}\nfirefox\n143.0\ncapture,restore");
+        let firefox_register = format!(
+            "POST /v1/browser/register HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {FIREFOX_EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{firefox_body}",
+            firefox_body.len()
+        );
+        assert!(
+            request(address, firefox_register.as_bytes())
+                .starts_with(b"HTTP/1.1 204 No Content\r\n")
+        );
+
+        let job = control.create_capture_job().unwrap();
+        assert_eq!(job.targets.len(), 2);
+
+        let chrome_poll_body = format!("{CAPTURE_WIRE_PREFIX}\n0123456789abcdef0123456789abcdef");
+        let chrome_poll = format!(
+            "POST /v1/browser/capture/poll HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{chrome_poll_body}",
+            chrome_poll_body.len()
+        );
+        let assignment = request(address, chrome_poll.as_bytes());
+        assert!(assignment.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert!(String::from_utf8_lossy(response_body(&assignment)).contains(&job.job_id));
+
+        let opaque = b"opaque-encrypted-browser-snapshot";
+        let result_head = format!(
+            "POST /v1/browser/capture/result HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: application/octet-stream\r\nX-TabSnap-Instance: 0123456789abcdef0123456789abcdef\r\nX-TabSnap-Job: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            job.job_id,
+            opaque.len()
+        );
+        let mut result_request = result_head.into_bytes();
+        result_request.extend_from_slice(opaque);
+        assert!(request(address, &result_request).starts_with(b"HTTP/1.1 204 No Content\r\n"));
+
+        let failure_body = format!(
+            "{CAPTURE_WIRE_PREFIX}\n{firefox_id}\n{}\npassword-required",
+            job.job_id
+        );
+        let failure = format!(
+            "POST /v1/browser/capture/failure HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {FIREFOX_EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{failure_body}",
+            failure_body.len()
+        );
+        assert!(request(address, failure.as_bytes()).starts_with(b"HTTP/1.1 204 No Content\r\n"));
+
+        let status = control.capture_job_status(&job.job_id).unwrap().unwrap();
+        assert!(status.is_terminal());
+        assert_eq!(status.completed_count(), 1);
+        assert_eq!(status.failed_count(), 1);
 
         worker.join().unwrap();
         if root.exists() {

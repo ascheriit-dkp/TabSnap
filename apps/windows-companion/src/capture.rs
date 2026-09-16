@@ -199,10 +199,8 @@ impl CaptureJobStore {
             return Err(CaptureJobError::CapacityExceeded);
         }
         targets.sort_by(|left, right| {
-            (left.instance.browser, left.instance.instance_id.as_str()).cmp(&(
-                right.instance.browser,
-                right.instance.instance_id.as_str(),
-            ))
+            (left.instance.browser, left.instance.instance_id.as_str())
+                .cmp(&(right.instance.browser, right.instance.instance_id.as_str()))
         });
 
         self.jobs.insert(
@@ -216,7 +214,11 @@ impl CaptureJobStore {
         self.status(&job_id, now).ok_or(CaptureJobError::NotFound)
     }
 
-    pub fn next_assignment(&mut self, instance_id: &str, now: Instant) -> Option<CaptureAssignment> {
+    pub fn next_assignment(
+        &mut self,
+        instance_id: &str,
+        now: Instant,
+    ) -> Option<CaptureAssignment> {
         self.refresh(now);
         let mut candidates = self
             .jobs
@@ -236,7 +238,7 @@ impl CaptureJobStore {
             })
             .map(|job| (job.created_at, job.job_id.clone()))
             .collect::<Vec<_>>();
-        candidates.sort_by(|left, right| left.cmp(right));
+        candidates.sort();
 
         let (_, job_id) = candidates.into_iter().next()?;
         let job = self.jobs.get_mut(&job_id)?;
@@ -335,9 +337,9 @@ impl CaptureJobStore {
                                 bytes: encrypted.len() as u64,
                             }
                         }
-                        CaptureTargetState::Failed { reason } => CaptureTargetStateView::Failed {
-                            reason: *reason,
-                        },
+                        CaptureTargetState::Failed { reason } => {
+                            CaptureTargetStateView::Failed { reason: *reason }
+                        }
                     },
                 })
                 .collect(),
@@ -374,7 +376,7 @@ pub fn valid_job_id(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coordination::{BrowserKind, BrowserCapability};
+    use crate::coordination::{BrowserCapability, BrowserKind};
 
     const JOB_ID: &str = "11111111111111111111111111111111";
     const CHROME_ID: &str = "0123456789abcdef0123456789abcdef";
@@ -411,7 +413,11 @@ mod tests {
             .create(
                 JOB_ID.to_owned(),
                 vec![
-                    instance(CHROME_ID, BrowserKind::Chrome, vec![BrowserCapability::Capture]),
+                    instance(
+                        CHROME_ID,
+                        BrowserKind::Chrome,
+                        vec![BrowserCapability::Capture],
+                    ),
                     instance(
                         FIREFOX_ID,
                         BrowserKind::Firefox,
@@ -465,7 +471,11 @@ mod tests {
         jobs.create(
             JOB_ID.to_owned(),
             vec![
-                instance(CHROME_ID, BrowserKind::Chrome, vec![BrowserCapability::Capture]),
+                instance(
+                    CHROME_ID,
+                    BrowserKind::Chrome,
+                    vec![BrowserCapability::Capture],
+                ),
                 instance(
                     FIREFOX_ID,
                     BrowserKind::Firefox,
@@ -478,13 +488,8 @@ mod tests {
 
         jobs.submit_result(JOB_ID, CHROME_ID, vec![1, 2, 3, 4], start)
             .unwrap();
-        jobs.submit_failure(
-            JOB_ID,
-            FIREFOX_ID,
-            CaptureFailure::PasswordRequired,
-            start,
-        )
-        .unwrap();
+        jobs.submit_failure(JOB_ID, FIREFOX_ID, CaptureFailure::PasswordRequired, start)
+            .unwrap();
 
         let status = jobs.status(JOB_ID, start).unwrap();
         assert!(status.is_terminal());
@@ -535,7 +540,11 @@ mod tests {
         jobs.create(
             JOB_ID.to_owned(),
             vec![
-                instance(CHROME_ID, BrowserKind::Chrome, vec![BrowserCapability::Capture]),
+                instance(
+                    CHROME_ID,
+                    BrowserKind::Chrome,
+                    vec![BrowserCapability::Capture],
+                ),
                 instance(
                     FIREFOX_ID,
                     BrowserKind::Firefox,

@@ -119,6 +119,14 @@ pub enum HeartbeatResult {
     OriginMismatch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorizationResult {
+    Allowed,
+    NotFound,
+    OriginMismatch,
+    MissingCapability,
+}
+
 #[derive(Debug)]
 struct RegistryEntry {
     registration: BrowserRegistration,
@@ -193,6 +201,26 @@ impl BrowserRegistry {
 
         entry.last_seen = now;
         HeartbeatResult::Refreshed
+    }
+
+    pub fn authorize(
+        &mut self,
+        instance_id: &str,
+        origin: &str,
+        capability: BrowserCapability,
+        now: Instant,
+    ) -> AuthorizationResult {
+        self.prune(now);
+        let Some(entry) = self.entries.get(instance_id) else {
+            return AuthorizationResult::NotFound;
+        };
+        if entry.origin != origin {
+            return AuthorizationResult::OriginMismatch;
+        }
+        if !entry.registration.capabilities.contains(&capability) {
+            return AuthorizationResult::MissingCapability;
+        }
+        AuthorizationResult::Allowed
     }
 
     pub fn active(&mut self, now: Instant) -> Vec<BrowserInstance> {
@@ -303,6 +331,33 @@ mod tests {
                 start,
             ),
             HeartbeatResult::OriginMismatch
+        );
+    }
+
+    #[test]
+    fn authorizes_only_the_registered_origin_and_capability() {
+        let start = Instant::now();
+        let mut registry = BrowserRegistry::default();
+        let mut capture_only = registration(INSTANCE_ID);
+        capture_only.capabilities = vec![BrowserCapability::Capture];
+        registry.register(capture_only, ORIGIN, start).unwrap();
+
+        assert_eq!(
+            registry.authorize(INSTANCE_ID, ORIGIN, BrowserCapability::Capture, start),
+            AuthorizationResult::Allowed
+        );
+        assert_eq!(
+            registry.authorize(INSTANCE_ID, ORIGIN, BrowserCapability::Restore, start),
+            AuthorizationResult::MissingCapability
+        );
+        assert_eq!(
+            registry.authorize(
+                INSTANCE_ID,
+                "moz-extension://944cfddf-7a95-3c47-bd9a-663b3ce8d699",
+                BrowserCapability::Capture,
+                start,
+            ),
+            AuthorizationResult::OriginMismatch
         );
     }
 
