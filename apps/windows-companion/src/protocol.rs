@@ -3,8 +3,13 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
+use crate::coordination::{
+    BROWSER_LEASE_SECONDS, BrowserCapability, BrowserKind, BrowserRegistration, BrowserRegistry,
+    COORDINATION_VERSION, HeartbeatResult, RegistryError, valid_instance_id,
+};
 use crate::library::{MAX_SNAPSHOT_FILE_BYTES, SnapshotLibrary};
 
 pub const PROTOCOL_VERSION: u8 = 1;
@@ -13,12 +18,15 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 const CHROME_EXTENSION_PREFIX: &str = "chrome-extension://";
 const FIREFOX_EXTENSION_PREFIX: &str = "moz-extension://";
+const BROWSER_WIRE_PREFIX: &str = "tabsnap-browser:v1";
+const MAX_COORDINATION_BODY_BYTES: u64 = 1024;
 
 #[derive(Debug)]
 pub struct ProtocolServer {
     listener: TcpListener,
     library: SnapshotLibrary,
     token: String,
+    registry: Mutex<BrowserRegistry>,
 }
 
 impl ProtocolServer {
@@ -39,6 +47,7 @@ impl ProtocolServer {
             listener,
             library,
             token,
+            registry: Mutex::new(BrowserRegistry::default()),
         })
     }
 
@@ -114,16 +123,120 @@ impl ProtocolServer {
             ("GET", "/v1/status") => HttpResponse::json(
                 200,
                 format!(
-                    "{{\"protocolVersion\":{PROTOCOL_VERSION},\"transport\":\"loopback-http\",\"authentication\":\"session-bearer\"}}"
+                    "{{\"protocolVersion\":{PROTOCOL_VERSION},\"transport\":\"loopback-http\",\"authentication\":\"session-bearer\",\"coordinationVersion\":{COORDINATION_VERSION},\"browserLeaseSeconds\":{BROWSER_LEASE_SECONDS}}}"
                 ),
             ),
             ("GET", "/v1/snapshots") => self.list_snapshots(),
             ("POST", "/v1/snapshot") => self.store_snapshot(&request),
             ("GET", "/v1/snapshot") => self.load_snapshot(&request),
+            ("POST", "/v1/browser/register") => {
+                self.register_browser(&request, cors_origin.as_deref())
+            }
+            ("POST", "/v1/browser/heartbeat") => {
+                self.heartbeat_browser(&request, cors_origin.as_deref())
+            }
+            ("GET", "/v1/browsers") => self.list_browsers(),
             _ => HttpResponse::json_error(404, "Unknown protocol endpoint."),
         };
 
         response.with_cors(cors_origin.as_deref())
+    }
+
+    fn register_browser(&self, request: &HttpRequest, origin: Option<&str>) -> HttpResponse {
+        let Some(origin) = origin else {
+            return HttpResponse::json_error(
+                403,
+                "Browser registration requires an extension origin.",
+            );
+        };
+        if !is_text_plain(request) {
+            return HttpResponse::json_error(415, "Browser registration must be text/plain.");
+        }
+        let Some(registration) = parse_browser_registration(&request.body) else {
+            return HttpResponse::json_error(400, "Browser registration is invalid.");
+        };
+
+        let Ok(mut registry) = self.registry.lock() else {
+            return HttpResponse::json_error(500, "Browser registry is unavailable.");
+        };
+        match registry.register(registration, origin, Instant::now()) {
+            Ok(()) => HttpResponse::empty(204),
+            Err(RegistryError::InvalidRegistration) => {
+                HttpResponse::json_error(400, "Browser registration is invalid.")
+            }
+            Err(RegistryError::OriginMismatch) => HttpResponse::json_error(
+                409,
+                "Browser instance belongs to another extension origin.",
+            ),
+            Err(RegistryError::CapacityExceeded) => {
+                HttpResponse::json_error(429, "Browser registry capacity is exhausted.")
+            }
+        }
+    }
+
+    fn heartbeat_browser(&self, request: &HttpRequest, origin: Option<&str>) -> HttpResponse {
+        let Some(origin) = origin else {
+            return HttpResponse::json_error(
+                403,
+                "Browser heartbeat requires an extension origin.",
+            );
+        };
+        if !is_text_plain(request) {
+            return HttpResponse::json_error(415, "Browser heartbeat must be text/plain.");
+        }
+        let Some(instance_id) = parse_browser_heartbeat(&request.body) else {
+            return HttpResponse::json_error(400, "Browser heartbeat is invalid.");
+        };
+
+        let Ok(mut registry) = self.registry.lock() else {
+            return HttpResponse::json_error(500, "Browser registry is unavailable.");
+        };
+        match registry.heartbeat(instance_id, origin, Instant::now()) {
+            HeartbeatResult::Refreshed => HttpResponse::empty(204),
+            HeartbeatResult::NotFound => {
+                HttpResponse::json_error(404, "Browser instance is not registered.")
+            }
+            HeartbeatResult::OriginMismatch => HttpResponse::json_error(
+                403,
+                "Browser instance belongs to another extension origin.",
+            ),
+        }
+    }
+
+    fn list_browsers(&self) -> HttpResponse {
+        let Ok(mut registry) = self.registry.lock() else {
+            return HttpResponse::json_error(500, "Browser registry is unavailable.");
+        };
+        let browsers = registry
+            .active(Instant::now())
+            .into_iter()
+            .map(|instance| {
+                let version = instance
+                    .version
+                    .as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".to_owned());
+                let capabilities = instance
+                    .capabilities
+                    .into_iter()
+                    .map(|capability| json_string(capability.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(
+                    "{{\"instanceId\":{},\"browser\":{},\"version\":{version},\"capabilities\":[{capabilities}]}}",
+                    json_string(&instance.instance_id),
+                    json_string(instance.browser.as_str()),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+
+        HttpResponse::json(
+            200,
+            format!(
+                "{{\"protocolVersion\":{PROTOCOL_VERSION},\"coordinationVersion\":{COORDINATION_VERSION},\"browserLeaseSeconds\":{BROWSER_LEASE_SECONDS},\"browsers\":[{browsers}]}}"
+            ),
+        )
     }
 
     fn authenticated(&self, request: &HttpRequest) -> bool {
@@ -414,7 +527,12 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, RequestError> {
             .map_err(|_| RequestError::new(400, "Invalid Content-Length."))?,
         None => 0,
     };
-    if content_length as u64 > MAX_SNAPSHOT_FILE_BYTES {
+    let body_limit = if matches!(path, "/v1/browser/register" | "/v1/browser/heartbeat") {
+        MAX_COORDINATION_BODY_BYTES
+    } else {
+        MAX_SNAPSHOT_FILE_BYTES
+    };
+    if content_length as u64 > body_limit {
         return Err(RequestError::new(
             413,
             "Request body exceeds the protocol limit.",
@@ -483,7 +601,15 @@ fn write_response(stream: &mut TcpStream, response: HttpResponse) -> io::Result<
 }
 
 fn is_protocol_path(path: &str) -> bool {
-    matches!(path, "/v1/status" | "/v1/snapshots" | "/v1/snapshot")
+    matches!(
+        path,
+        "/v1/status"
+            | "/v1/snapshots"
+            | "/v1/snapshot"
+            | "/v1/browser/register"
+            | "/v1/browser/heartbeat"
+            | "/v1/browsers"
+    )
 }
 
 fn valid_extension_origin(origin: &str) -> bool {
@@ -513,6 +639,57 @@ fn valid_firefox_extension_origin(origin: &str) -> bool {
             matches!(*byte, b'0'..=b'9' | b'a'..=b'f')
         }
     })
+}
+
+fn is_text_plain(request: &HttpRequest) -> bool {
+    request.header("content-type").is_some_and(|value| {
+        value
+            .split(';')
+            .next()
+            .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("text/plain"))
+    })
+}
+
+fn parse_browser_registration(body: &[u8]) -> Option<BrowserRegistration> {
+    let text = std::str::from_utf8(body).ok()?;
+    if text.contains('\r') {
+        return None;
+    }
+    let parts = text.split('\n').collect::<Vec<_>>();
+    if parts.len() != 5 || parts[0] != BROWSER_WIRE_PREFIX {
+        return None;
+    }
+
+    let instance_id = parts[1].to_owned();
+    let browser = BrowserKind::parse(parts[2])?;
+    let version = match parts[3] {
+        "-" => None,
+        value => Some(value.to_owned()),
+    };
+    let capabilities = parts[4]
+        .split(',')
+        .map(BrowserCapability::parse)
+        .collect::<Option<Vec<_>>>()?;
+
+    let registration = BrowserRegistration {
+        instance_id,
+        browser,
+        version,
+        capabilities,
+    };
+    registration.validate().then_some(registration)
+}
+
+fn parse_browser_heartbeat(body: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(body).ok()?;
+    if text.contains('\r') {
+        return None;
+    }
+    let parts = text.split('\n').collect::<Vec<_>>();
+    if parts.len() != 2 || parts[0] != BROWSER_WIRE_PREFIX || !valid_instance_id(parts[1]) {
+        return None;
+    }
+    Some(parts[1])
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -586,9 +763,11 @@ fn status_reason(status: u16) -> &'static str {
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
         411 => "Length Required",
         413 => "Content Too Large",
         415 => "Unsupported Media Type",
+        429 => "Too Many Requests",
         431 => "Request Header Fields Too Large",
         _ => "Internal Server Error",
     }
@@ -793,6 +972,67 @@ mod tests {
         assert!(response_text.contains(&format!(
             "Access-Control-Allow-Origin: {FIREFOX_EXTENSION_ORIGIN}\r\n"
         )));
+        worker.join().unwrap();
+        if root.exists() {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn registers_heartbeats_and_lists_browser_instances() {
+        let (server, root) = test_server("browser-registry");
+        let address = server.local_addr().unwrap();
+        let worker = thread::spawn(move || server.serve_n(3).unwrap());
+        let body = format!(
+            "{BROWSER_WIRE_PREFIX}\n0123456789abcdef0123456789abcdef\nfirefox\n143.0\ncapture,restore"
+        );
+        let register = format!(
+            "POST /v1/browser/register HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {FIREFOX_EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain;charset=UTF-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let registered = request(address, register.as_bytes());
+        assert!(registered.starts_with(b"HTTP/1.1 204 No Content\r\n"));
+
+        let heartbeat_body = format!("{BROWSER_WIRE_PREFIX}\n0123456789abcdef0123456789abcdef");
+        let heartbeat = format!(
+            "POST /v1/browser/heartbeat HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {FIREFOX_EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{heartbeat_body}",
+            heartbeat_body.len()
+        );
+        let refreshed = request(address, heartbeat.as_bytes());
+        assert!(refreshed.starts_with(b"HTTP/1.1 204 No Content\r\n"));
+
+        let list = format!(
+            "GET /v1/browsers HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {FIREFOX_EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nConnection: close\r\n\r\n"
+        );
+        let listed = request(address, list.as_bytes());
+        assert!(listed.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        let body = String::from_utf8_lossy(response_body(&listed));
+        assert!(body.contains("\"coordinationVersion\":1"));
+        assert!(body.contains("\"browser\":\"firefox\""));
+        assert!(body.contains("\"capabilities\":[\"capture\",\"restore\"]"));
+
+        worker.join().unwrap();
+        if root.exists() {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn rejects_browser_registration_without_extension_origin() {
+        let (server, root) = test_server("browser-origin");
+        let address = server.local_addr().unwrap();
+        let worker = thread::spawn(move || server.serve_n(1).unwrap());
+        let body = format!(
+            "{BROWSER_WIRE_PREFIX}\n0123456789abcdef0123456789abcdef\nchrome\n140.0\ncapture,restore"
+        );
+        let register = format!(
+            "POST /v1/browser/register HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+
+        let response = request(address, register.as_bytes());
+        assert!(response.starts_with(b"HTTP/1.1 403 Forbidden\r\n"));
+
         worker.join().unwrap();
         if root.exists() {
             fs::remove_dir_all(root).unwrap();

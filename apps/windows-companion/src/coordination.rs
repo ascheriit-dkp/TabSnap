@@ -208,7 +208,8 @@ impl BrowserRegistry {
             })
             .collect::<Vec<_>>();
         instances.sort_by(|left, right| {
-            (left.browser, left.instance_id.as_str()).cmp(&(right.browser, right.instance_id.as_str()))
+            (left.browser, left.instance_id.as_str())
+                .cmp(&(right.browser, right.instance_id.as_str()))
         });
         instances
     }
@@ -220,15 +221,18 @@ impl BrowserRegistry {
 }
 
 pub fn valid_instance_id(value: &str) -> bool {
-    value.len() == 32 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 fn valid_browser_version(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_BROWSER_VERSION_LENGTH
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'))
 }
 
 #[cfg(test)]
@@ -273,10 +277,7 @@ mod tests {
             registry.heartbeat(INSTANCE_ID, ORIGIN, start + Duration::from_secs(20)),
             HeartbeatResult::Refreshed
         );
-        assert_eq!(
-            registry.active(start + Duration::from_secs(40)).len(),
-            1
-        );
+        assert_eq!(registry.active(start + Duration::from_secs(40)).len(), 1);
     }
 
     #[test]
