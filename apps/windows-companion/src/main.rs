@@ -1,3 +1,4 @@
+pub mod capture;
 pub mod coordination;
 pub mod library;
 pub mod protocol;
@@ -5,9 +6,13 @@ pub mod ui;
 
 use std::env;
 use std::error::Error;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::thread;
+use std::time::Duration;
 
+use capture::{CaptureJobStatus, CaptureTargetStateView};
 use library::SnapshotLibrary;
 use protocol::ProtocolServer;
 use tabsnap_companion::{
@@ -23,6 +28,7 @@ fn print_help() {
     println!("  tabsnap-companion init");
     println!("  tabsnap-companion ui");
     println!("  tabsnap-companion serve");
+    println!("  tabsnap-companion capture");
     println!("  tabsnap-companion storage show");
     println!("  tabsnap-companion storage set portable");
     println!("  tabsnap-companion storage set local");
@@ -126,6 +132,74 @@ fn serve(layout: &PortableLayout) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn print_capture_status(status: &CaptureJobStatus) {
+    for target in &status.targets {
+        let state = match target.state {
+            CaptureTargetStateView::Pending => "pending".to_owned(),
+            CaptureTargetStateView::Claimed => "capturing".to_owned(),
+            CaptureTargetStateView::Complete { bytes } => format!("complete ({bytes} bytes)"),
+            CaptureTargetStateView::Failed { reason } => {
+                format!("failed ({})", reason.as_str())
+            }
+        };
+        println!(
+            "{}\t{}\t{}",
+            target.instance.browser.as_str(),
+            target.instance.instance_id,
+            state
+        );
+    }
+}
+
+fn run_capture_command(layout: &PortableLayout) -> Result<(), Box<dyn Error>> {
+    let library = snapshot_library(layout)?;
+    validate_storage_dir(library.root())?;
+    let server = ProtocolServer::bind(library)?;
+    let control = server.capture_control();
+
+    println!("TabSnap coordinated capture v1");
+    println!("endpoint: {}", server.endpoint()?);
+    println!("pairing-code: {}", server.pairing_code()?);
+    println!("Connect the browser pages you want to capture, then press Enter.");
+
+    thread::spawn(move || {
+        if let Err(error) = server.serve_forever() {
+            eprintln!("TabSnap Companion protocol error: {error}");
+        }
+    });
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let created = control.create_capture_job()?;
+    println!("capture-job: {}", created.job_id);
+    print_capture_status(&created);
+
+    let mut previous = created;
+    loop {
+        thread::sleep(Duration::from_millis(250));
+        let Some(current) = control.capture_job_status(&previous.job_id)? else {
+            return Err("Capture job expired before completion.".into());
+        };
+        if current != previous {
+            println!();
+            print_capture_status(&current);
+        }
+        if current.is_terminal() {
+            println!();
+            println!(
+                "capture complete: {} succeeded, {} failed",
+                current.completed_count(),
+                current.failed_count()
+            );
+            println!(
+                "M30 results are held in memory only; M31 adds the machine snapshot container."
+            );
+            return Ok(());
+        }
+        previous = current;
+    }
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     let command = args.get(1).map(String::as_str).unwrap_or("info");
@@ -142,6 +216,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         "ui" => ui::run()?,
         "serve" => serve(&layout)?,
+        "capture" => run_capture_command(&layout)?,
         "storage" => match args.get(2).map(String::as_str) {
             Some("show") => {
                 let mode = load_storage_mode(&layout)?;
