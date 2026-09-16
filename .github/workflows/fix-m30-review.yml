@@ -33,4 +33,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/windows-companion/src/capture.rs
           git commit -m "fix: preserve terminal capture result semantics"
+          git pull --rebase origin feat/level4-coordinated-capture
           git push origin HEAD:feat/level4-coordinated-capture
