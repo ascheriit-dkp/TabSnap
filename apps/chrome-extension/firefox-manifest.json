@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "TabSnap",
   "version": "0.3.0",
-  "version_name": "0.3.0-alpha.2",
+  "version_name": "0.3.0-alpha.3",
   "description": "Move a browser workspace between machines without a backend.",
   "permissions": ["tabs", "tabGroups"],
   "optional_host_permissions": ["http://127.0.0.1/*"],
