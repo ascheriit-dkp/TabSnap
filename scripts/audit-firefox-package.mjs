@@ -51,10 +51,17 @@ assert(
 
 const gecko = manifest.browser_specific_settings?.gecko;
 assert(gecko?.id === expectedGeckoId, `Gecko ID must stay ${expectedGeckoId}.`);
-assert(gecko?.strict_min_version === '139.0', 'Firefox minimum version must stay 139.0.');
+assert(
+  gecko?.strict_min_version === '140.0',
+  'Firefox minimum version must stay 140.0 for built-in data consent.',
+);
 assert(
   sameStrings(gecko?.data_collection_permissions?.required, ['none']),
-  'AMO data collection declaration must remain required: none.',
+  'Extension-only mode must require no data collection.',
+);
+assert(
+  sameStrings(gecko?.data_collection_permissions?.optional, ['browsingActivity']),
+  'Firefox companion mode must declare optional browsingActivity data collection.',
 );
 
 const csp = manifest.content_security_policy?.extension_pages;
