@@ -1,0 +1,40 @@
+name: Patch M30 Extension
+
+on:
+  push:
+    branches:
+      - feat/level4-coordinated-capture
+    paths:
+      - .github/workflows/patch-m30-extension.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/level4-coordinated-capture
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: pnpm install --no-frozen-lockfile
+      - name: Apply patch
+        run: python .github/scripts/patch-m30-extension.py
+      - name: Format
+        run: pnpm prettier --write apps/chrome-extension/src/companion.ts apps/chrome-extension/src/companion.test.ts apps/chrome-extension/src/main.ts
+      - name: Check
+        run: pnpm check
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/chrome-extension/src/companion.ts apps/chrome-extension/src/companion.test.ts apps/chrome-extension/src/main.ts
+          git commit -m "feat: execute coordinated capture in browser extensions"
+          git push origin HEAD:feat/level4-coordinated-capture
