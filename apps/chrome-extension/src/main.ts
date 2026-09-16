@@ -336,7 +336,9 @@ companionConnectButton.addEventListener('click', () => {
     companionPairing.value = '';
     await refreshCompanionLibrary(client);
     setStatus(
-      'Portable companion connected for this page session. Firefox companion mode is opt-in; encrypted snapshots can leave the extension only after consent. The pairing token is kept in memory only.',
+      browser === 'firefox'
+        ? 'Portable companion connected for this page session. Firefox data transmission consent and loopback access are enabled for companion mode. The pairing token is kept in memory only.'
+        : 'Portable companion connected for this page session. The pairing token is kept in memory only.',
       'success',
     );
   });
