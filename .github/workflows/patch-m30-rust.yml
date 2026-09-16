@@ -1,0 +1,40 @@
+name: Patch M30 Rust
+
+on:
+  push:
+    branches:
+      - feat/level4-coordinated-capture
+    paths:
+      - .github/workflows/patch-m30-rust.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/level4-coordinated-capture
+      - name: Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add clippy rustfmt
+      - name: Apply patch
+        run: python .github/scripts/patch-m30-rust.py
+      - name: Format
+        run: cargo fmt --manifest-path apps/windows-companion/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path apps/windows-companion/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --manifest-path apps/windows-companion/Cargo.toml --locked
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/windows-companion/src/capture.rs apps/windows-companion/src/coordination.rs apps/windows-companion/src/protocol.rs apps/windows-companion/src/main.rs
+          git commit -m "feat: wire coordinated capture through companion"
+          git push origin HEAD:feat/level4-coordinated-capture
