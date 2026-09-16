@@ -12,6 +12,7 @@ const TOKEN_BYTES: usize = 32;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 const CHROME_EXTENSION_PREFIX: &str = "chrome-extension://";
+const FIREFOX_EXTENSION_PREFIX: &str = "moz-extension://";
 
 #[derive(Debug)]
 pub struct ProtocolServer {
@@ -85,7 +86,7 @@ impl ProtocolServer {
 
     fn route(&self, request: HttpRequest) -> HttpResponse {
         let cors_origin = match request.header("origin") {
-            Some(origin) if valid_chrome_extension_origin(origin) => Some(origin.to_owned()),
+            Some(origin) if valid_extension_origin(origin) => Some(origin.to_owned()),
             Some(_) => return HttpResponse::json_error(403, "Browser origin is not allowed."),
             None => None,
         };
@@ -485,11 +486,33 @@ fn is_protocol_path(path: &str) -> bool {
     matches!(path, "/v1/status" | "/v1/snapshots" | "/v1/snapshot")
 }
 
-fn valid_chrome_extension_origin(origin: &str) -> bool {
+fn valid_extension_origin(origin: &str) -> bool {
+    valid_chromium_extension_origin(origin) || valid_firefox_extension_origin(origin)
+}
+
+fn valid_chromium_extension_origin(origin: &str) -> bool {
     let Some(id) = origin.strip_prefix(CHROME_EXTENSION_PREFIX) else {
         return false;
     };
     id.len() == 32 && id.bytes().all(|byte| matches!(byte, b'a'..=b'p'))
+}
+
+fn valid_firefox_extension_origin(origin: &str) -> bool {
+    let Some(id) = origin.strip_prefix(FIREFOX_EXTENSION_PREFIX) else {
+        return false;
+    };
+    let bytes = id.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+
+    bytes.iter().enumerate().all(|(index, byte)| {
+        if matches!(index, 8 | 13 | 18 | 23) {
+            *byte == b'-'
+        } else {
+            matches!(*byte, b'0'..=b'9' | b'a'..=b'f')
+        }
+    })
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -641,6 +664,7 @@ mod tests {
 
     const TEST_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const EXTENSION_ORIGIN: &str = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+    const FIREFOX_EXTENSION_ORIGIN: &str = "moz-extension://944cfddf-7a95-3c47-bd9a-663b3ce8d699";
 
     fn temp_root(label: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()
@@ -746,6 +770,28 @@ mod tests {
         assert!(response_text.starts_with("HTTP/1.1 204 No Content\r\n"));
         assert!(response_text.contains(&format!(
             "Access-Control-Allow-Origin: {EXTENSION_ORIGIN}\r\n"
+        )));
+        worker.join().unwrap();
+        if root.exists() {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn supports_firefox_extension_preflight() {
+        let (server, root) = test_server("firefox-preflight");
+        let address = server.local_addr().unwrap();
+        let worker = thread::spawn(move || server.serve_n(1).unwrap());
+        let request_text = format!(
+            "OPTIONS /v1/status HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {FIREFOX_EXTENSION_ORIGIN}\r\nAccess-Control-Request-Method: GET\r\nConnection: close\r\n\r\n"
+        );
+
+        let response = request(address, request_text.as_bytes());
+        let response_text = String::from_utf8(response).unwrap();
+
+        assert!(response_text.starts_with("HTTP/1.1 204 No Content\r\n"));
+        assert!(response_text.contains(&format!(
+            "Access-Control-Allow-Origin: {FIREFOX_EXTENSION_ORIGIN}\r\n"
         )));
         worker.join().unwrap();
         if root.exists() {
