@@ -1,6 +1,8 @@
 # Firefox extension
 
-TabSnap targets **Firefox Desktop 139+**.
+TabSnap targets **Firefox Desktop 140+**.
+
+Firefox 139 introduced the full tab-group API TabSnap needs. The current minimum is 140 because optional companion mode uses Firefox's built-in data collection/transmission consent instead of a custom legacy consent flow.
 
 Firefox uses the same `.tabsnap` format, encryption, compression, UI and companion protocol as Chrome and Edge. Browser capture and restore behavior is selected through the Firefox adapter at runtime.
 
@@ -17,6 +19,7 @@ It includes:
 - window bounds and state
 - non-destructive restore
 - the optional authenticated localhost companion bridge
+- Firefox built-in optional data consent for companion mode
 - a Firefox-specific Manifest V3 package
 - Mozilla `web-ext lint` in CI
 
@@ -52,7 +55,7 @@ apps/chrome-extension/dist-firefox/
 
 For a manual temporary install in Firefox, open `about:debugging`, choose **This Firefox**, choose **Load Temporary Add-on**, then select `apps/chrome-extension/dist-firefox/manifest.json`.
 
-Temporary installs are for development only. AMO signing and the normal Firefox Add-ons distribution flow belong to M28.
+Temporary installs are for development only. AMO signing is an external store action.
 
 ## Private windows
 
@@ -60,4 +63,8 @@ Firefox controls whether an extension may run in private windows. TabSnap does n
 
 ## Companion
 
-The Windows companion protocol is unchanged. Connecting remains explicit and requests only optional access to `http://127.0.0.1/*`. The pairing token stays in memory for the current extension page session.
+The companion is optional. Extension-only capture, encrypted export/import and restore do not need it.
+
+When the user presses Connect, Firefox first asks for optional `browsingActivity` data consent because encrypted snapshots contain URLs and are sent outside the extension to the local companion. TabSnap then requests optional access to `http://127.0.0.1/*`.
+
+Declining either permission leaves companion mode off. The pairing token stays in memory for the current extension page session. Snapshots are encrypted before transmission, and the password never leaves the extension.

@@ -11,6 +11,7 @@ export default defineConfig({
       { text: 'Edge', link: '/guide/edge-extension' },
       { text: 'Firefox', link: '/guide/firefox-extension' },
       { text: 'Format', link: '/technical/tabsnap-format' },
+      { text: 'Privacy', link: '/privacy' },
       { text: 'Security', link: '/security/' },
       { text: 'Architecture', link: '/architecture/' },
       { text: 'Roadmap', link: '/roadmap' },
@@ -24,6 +25,7 @@ export default defineConfig({
           { text: 'Microsoft Edge', link: '/guide/edge-extension' },
           { text: 'Firefox', link: '/guide/firefox-extension' },
           { text: 'Windows companion', link: '/guide/windows-companion' },
+          { text: 'Store submission', link: '/guide/store-submission' },
           { text: 'Development', link: '/guide/development' },
         ],
       },
@@ -38,6 +40,7 @@ export default defineConfig({
       {
         text: 'Project',
         items: [
+          { text: 'Privacy', link: '/privacy' },
           { text: 'Security', link: '/security/' },
           { text: 'Architecture', link: '/architecture/' },
           { text: 'Roadmap', link: '/roadmap' },
