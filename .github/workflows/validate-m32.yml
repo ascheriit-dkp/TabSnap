@@ -1,4 +1,5 @@
 name: Validate M32
+# rerun after formatting
 
 on:
   push:
