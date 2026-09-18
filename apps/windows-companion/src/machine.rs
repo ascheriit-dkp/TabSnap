@@ -846,7 +846,14 @@ mod tests {
     #[test]
     fn sanitizes_windows_reserved_machine_names() {
         for reserved in [
-            "CON", "prn", "AUX.txt", "nul", "COM1", "com9.backup", "LPT1", "lpt9.log",
+            "CON",
+            "prn",
+            "AUX.txt",
+            "nul",
+            "COM1",
+            "com9.backup",
+            "LPT1",
+            "lpt9.log",
         ] {
             let safe = safe_machine_name(reserved);
             assert!(safe.starts_with('_'), "{reserved} -> {safe}");
