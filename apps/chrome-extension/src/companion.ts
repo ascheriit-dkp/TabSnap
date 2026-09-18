@@ -3,6 +3,7 @@ import type { Browser } from '@tabsnap/schema';
 export const COMPANION_PROTOCOL_VERSION = 1;
 export const COMPANION_COORDINATION_VERSION = 1;
 export const COMPANION_CAPTURE_VERSION = 1;
+export const COMPANION_RESTORE_VERSION = 1;
 export const COMPANION_ORIGIN_PERMISSION = 'http://127.0.0.1/*';
 export const MAX_COMPANION_SNAPSHOT_BYTES = 65 * 1024 * 1024;
 export const MAX_COMPANION_BROWSER_INSTANCES = 32;
@@ -10,9 +11,10 @@ export const MAX_COMPANION_BROWSER_INSTANCES = 32;
 const PAIRING_PREFIX = `tabsnap-companion:v${COMPANION_PROTOCOL_VERSION}:`;
 const BROWSER_WIRE_PREFIX = `tabsnap-browser:v${COMPANION_COORDINATION_VERSION}`;
 const CAPTURE_WIRE_PREFIX = `tabsnap-capture:v${COMPANION_CAPTURE_VERSION}`;
+const RESTORE_WIRE_PREFIX = `tabsnap-restore:v${COMPANION_RESTORE_VERSION}`;
 const SESSION_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
 const BROWSER_INSTANCE_ID_PATTERN = /^[0-9a-f]{32}$/u;
-const CAPTURE_JOB_ID_PATTERN = /^[0-9a-f]{32}$/u;
+const JOB_ID_PATTERN = /^[0-9a-f]{32}$/u;
 const BROWSER_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/u;
 const DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -28,6 +30,7 @@ export interface CompanionStatus {
   coordinationVersion?: number;
   browserLeaseSeconds?: number;
   captureVersion?: number;
+  restoreVersion?: number;
 }
 
 export type CompanionBrowserCapability = 'capture' | 'restore';
@@ -46,6 +49,15 @@ export interface CompanionCaptureAssignment {
 }
 
 export type CompanionCaptureFailure = 'password-required' | 'capture-failed' | 'encryption-failed';
+
+export interface CompanionRestoreAssignment {
+  jobId: string;
+  sourceInstanceId: string;
+  sourceBrowser: Browser;
+  encrypted: Uint8Array;
+}
+
+export type CompanionRestoreFailure = 'password-required' | 'decrypt-failed' | 'restore-failed';
 
 export interface CompanionSnapshotEntry {
   name: string;
@@ -128,9 +140,10 @@ export class CompanionClient {
     const coordinationVersion = payload.coordinationVersion;
     const browserLeaseSeconds = payload.browserLeaseSeconds;
     const captureVersion = payload.captureVersion;
+    const restoreVersion = payload.restoreVersion;
     if (coordinationVersion === undefined && browserLeaseSeconds === undefined) {
-      if (captureVersion !== undefined) {
-        throw new Error('Companion capture status is incompatible.');
+      if (captureVersion !== undefined || restoreVersion !== undefined) {
+        throw new Error('Companion coordination status is incompatible.');
       }
       return { protocolVersion, transport, authentication };
     }
@@ -140,7 +153,8 @@ export class CompanionClient {
       !Number.isSafeInteger(browserLeaseSeconds) ||
       browserLeaseSeconds < 5 ||
       browserLeaseSeconds > 300 ||
-      (captureVersion !== undefined && captureVersion !== COMPANION_CAPTURE_VERSION)
+      (captureVersion !== undefined && captureVersion !== COMPANION_CAPTURE_VERSION) ||
+      (restoreVersion !== undefined && restoreVersion !== COMPANION_RESTORE_VERSION)
     ) {
       throw new Error('Companion coordination status is incompatible.');
     }
@@ -152,6 +166,7 @@ export class CompanionClient {
       coordinationVersion,
       browserLeaseSeconds,
       ...(captureVersion === undefined ? {} : { captureVersion }),
+      ...(restoreVersion === undefined ? {} : { restoreVersion }),
     };
   }
 
@@ -193,7 +208,7 @@ export class CompanionClient {
       payload.coordinationVersion !== COMPANION_COORDINATION_VERSION ||
       payload.captureVersion !== COMPANION_CAPTURE_VERSION ||
       typeof payload.jobId !== 'string' ||
-      !CAPTURE_JOB_ID_PATTERN.test(payload.jobId)
+      !JOB_ID_PATTERN.test(payload.jobId)
     ) {
       throw new Error('Companion returned an invalid capture assignment.');
     }
@@ -236,6 +251,88 @@ export class CompanionClient {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
       body: `${CAPTURE_WIRE_PREFIX}\n${instanceId}\n${jobId}\n${reason}`,
+    });
+  }
+
+  async pollRestore(instanceId: string): Promise<CompanionRestoreAssignment | undefined> {
+    assertBrowserInstanceId(instanceId);
+    const response = await this.#request('/v1/browser/restore/poll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: `${RESTORE_WIRE_PREFIX}\n${instanceId}`,
+    });
+    if (response.status === 204) return undefined;
+
+    const contentType = response.headers
+      .get('content-type')
+      ?.split(';', 1)[0]
+      ?.trim()
+      .toLowerCase();
+    const jobId = response.headers.get('X-TabSnap-Restore-Job');
+    const sourceInstanceId = response.headers.get('X-TabSnap-Source-Instance');
+    const sourceBrowser = response.headers.get('X-TabSnap-Source-Browser');
+    if (
+      contentType !== 'application/octet-stream' ||
+      jobId === null ||
+      !JOB_ID_PATTERN.test(jobId) ||
+      sourceInstanceId === null ||
+      !BROWSER_INSTANCE_ID_PATTERN.test(sourceInstanceId) ||
+      !isBrowser(sourceBrowser)
+    ) {
+      throw new Error('Companion returned an invalid restore assignment.');
+    }
+
+    const announcedLength = response.headers.get('content-length');
+    if (announcedLength !== null) {
+      const size = Number(announcedLength);
+      if (
+        !Number.isSafeInteger(size) ||
+        size <= 0 ||
+        size > MAX_COMPANION_SNAPSHOT_BYTES
+      ) {
+        throw new Error('Encrypted restore payload exceeds the companion size limit.');
+      }
+    }
+
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength === 0) {
+      throw new Error('Companion returned an empty restore payload.');
+    }
+    if (buffer.byteLength > MAX_COMPANION_SNAPSHOT_BYTES) {
+      throw new Error('Encrypted restore payload exceeds the companion size limit.');
+    }
+
+    return {
+      jobId,
+      sourceInstanceId,
+      sourceBrowser,
+      encrypted: new Uint8Array(buffer),
+    };
+  }
+
+  async submitRestoreSuccess(instanceId: string, jobId: string): Promise<void> {
+    assertBrowserInstanceId(instanceId);
+    assertRestoreJobId(jobId);
+    await this.#request('/v1/browser/restore/result', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: `${RESTORE_WIRE_PREFIX}\n${instanceId}\n${jobId}`,
+    });
+  }
+
+  async submitRestoreFailure(
+    instanceId: string,
+    jobId: string,
+    reason: CompanionRestoreFailure,
+  ): Promise<void> {
+    assertBrowserInstanceId(instanceId);
+    assertRestoreJobId(jobId);
+    if (!isRestoreFailure(reason)) throw new Error('Invalid companion restore failure reason.');
+
+    await this.#request('/v1/browser/restore/failure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: `${RESTORE_WIRE_PREFIX}\n${instanceId}\n${jobId}\n${reason}`,
     });
   }
 
@@ -388,8 +485,14 @@ function assertBrowserInstanceId(instanceId: string): void {
 }
 
 function assertCaptureJobId(jobId: string): void {
-  if (!CAPTURE_JOB_ID_PATTERN.test(jobId)) {
+  if (!JOB_ID_PATTERN.test(jobId)) {
     throw new Error('Invalid companion capture job id.');
+  }
+}
+
+function assertRestoreJobId(jobId: string): void {
+  if (!JOB_ID_PATTERN.test(jobId)) {
+    throw new Error('Invalid companion restore job id.');
   }
 }
 
@@ -446,6 +549,10 @@ function isCaptureFailure(value: unknown): value is CompanionCaptureFailure {
   return (
     value === 'password-required' || value === 'capture-failed' || value === 'encryption-failed'
   );
+}
+
+function isRestoreFailure(value: unknown): value is CompanionRestoreFailure {
+  return value === 'password-required' || value === 'decrypt-failed' || value === 'restore-failed';
 }
 
 function isBrowserCapability(value: unknown): value is CompanionBrowserCapability {
