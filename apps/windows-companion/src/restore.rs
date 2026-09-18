@@ -367,7 +367,7 @@ impl RestoreJobStore {
             return Err(RestoreJobError::NoRetryableTargets);
         }
 
-        let mut used = job
+        let used = job
             .targets
             .iter()
             .filter(|target| {
@@ -399,7 +399,6 @@ impl RestoreJobStore {
         }
 
         assign_available_destinations(&mut job.targets, instances, &used);
-        used.clear();
         job.attempt_started_at = now;
         self.status(job_id, now).ok_or(RestoreJobError::NotFound)
     }
