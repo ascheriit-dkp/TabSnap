@@ -202,7 +202,8 @@ impl RestoreJobStore {
         if self.jobs.contains_key(&job_id) {
             return Err(RestoreJobError::DuplicateJob);
         }
-        if self.jobs.len() >= MAX_RESTORE_JOBS || machine.manifest.targets.len() > MAX_BROWSER_INSTANCES
+        if self.jobs.len() >= MAX_RESTORE_JOBS
+            || machine.manifest.targets.len() > MAX_BROWSER_INSTANCES
         {
             return Err(RestoreJobError::CapacityExceeded);
         }
@@ -320,16 +321,15 @@ impl RestoreJobStore {
     ) -> Result<(), RestoreJobError> {
         self.refresh(now);
         let job = self.jobs.get_mut(job_id).ok_or(RestoreJobError::NotFound)?;
-        let target = job
-            .targets
-            .iter_mut()
-            .find(|target| {
-                target
-                    .destination
-                    .as_ref()
-                    .is_some_and(|destination| destination.instance_id == destination_instance_id)
-            })
-            .ok_or(RestoreJobError::TargetNotFound)?;
+        let target =
+            job.targets
+                .iter_mut()
+                .find(|target| {
+                    target.destination.as_ref().is_some_and(|destination| {
+                        destination.instance_id == destination_instance_id
+                    })
+                })
+                .ok_or(RestoreJobError::TargetNotFound)?;
 
         match target.state {
             RestoreTargetState::Pending | RestoreTargetState::Claimed { .. } => {
@@ -475,7 +475,8 @@ fn assign_available_destinations(
 
     for target in targets.iter_mut().filter(|target| is_unmapped(target)) {
         if let Some(destination) = available.iter().find(|instance| {
-            instance.instance_id == target.source_instance_id && !used.contains(&instance.instance_id)
+            instance.instance_id == target.source_instance_id
+                && !used.contains(&instance.instance_id)
         }) {
             target.destination = Some(destination.clone());
             target.state = RestoreTargetState::Pending;
@@ -520,7 +521,7 @@ mod tests {
     use super::*;
     use crate::capture::CaptureFailure;
     use crate::machine::{
-        MachineManifest, MachineTargetManifest, MachineTargetState, MACHINE_CONTAINER_VERSION,
+        MACHINE_CONTAINER_VERSION, MachineManifest, MachineTargetManifest, MachineTargetState,
     };
     use std::path::PathBuf;
     use std::time::SystemTime;

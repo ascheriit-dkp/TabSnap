@@ -220,13 +220,7 @@ fn print_restore_status(status: &RestoreJobStatus) {
         let destination = target
             .destination
             .as_ref()
-            .map(|instance| {
-                format!(
-                    "{} {}",
-                    instance.browser.as_str(),
-                    instance.instance_id
-                )
-            })
+            .map(|instance| format!("{} {}", instance.browser.as_str(), instance.instance_id))
             .unwrap_or_else(|| "-".to_owned());
         let state = match target.state {
             RestoreTargetStateView::Pending => "pending".to_owned(),

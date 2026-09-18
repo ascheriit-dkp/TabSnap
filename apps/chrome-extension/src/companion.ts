@@ -285,11 +285,7 @@ export class CompanionClient {
     const announcedLength = response.headers.get('content-length');
     if (announcedLength !== null) {
       const size = Number(announcedLength);
-      if (
-        !Number.isSafeInteger(size) ||
-        size <= 0 ||
-        size > MAX_COMPANION_SNAPSHOT_BYTES
-      ) {
+      if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_COMPANION_SNAPSHOT_BYTES) {
         throw new Error('Encrypted restore payload exceeds the companion size limit.');
       }
     }

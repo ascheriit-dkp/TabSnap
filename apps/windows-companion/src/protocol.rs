@@ -568,16 +568,13 @@ impl ProtocolServer {
             return HttpResponse::empty(204);
         };
 
-        match self
-            .machine_library
-            .read_encrypted_payload(&assignment.machine_file_name, &assignment.source_instance_id)
-        {
+        match self.machine_library.read_encrypted_payload(
+            &assignment.machine_file_name,
+            &assignment.source_instance_id,
+        ) {
             Ok(bytes) => HttpResponse::binary(200, bytes)
                 .with_header("X-TabSnap-Restore-Job", assignment.job_id)
-                .with_header(
-                    "X-TabSnap-Source-Instance",
-                    assignment.source_instance_id,
-                )
+                .with_header("X-TabSnap-Source-Instance", assignment.source_instance_id)
                 .with_header(
                     "X-TabSnap-Source-Browser",
                     assignment.source_browser.as_str(),
@@ -596,11 +593,7 @@ impl ProtocolServer {
         }
     }
 
-    fn submit_restore_success(
-        &self,
-        request: &HttpRequest,
-        origin: Option<&str>,
-    ) -> HttpResponse {
+    fn submit_restore_success(&self, request: &HttpRequest, origin: Option<&str>) -> HttpResponse {
         let Some(origin) = origin else {
             return HttpResponse::json_error(403, "Restore result requires an extension origin.");
         };
@@ -629,11 +622,7 @@ impl ProtocolServer {
         }
     }
 
-    fn submit_restore_failure(
-        &self,
-        request: &HttpRequest,
-        origin: Option<&str>,
-    ) -> HttpResponse {
+    fn submit_restore_failure(&self, request: &HttpRequest, origin: Option<&str>) -> HttpResponse {
         let Some(origin) = origin else {
             return HttpResponse::json_error(403, "Restore failure requires an extension origin.");
         };
@@ -1236,11 +1225,7 @@ fn parse_restore_failure(body: &[u8]) -> Option<(&str, &str, RestoreFailure)> {
     {
         return None;
     }
-    Some((
-        parts[1],
-        parts[2],
-        RestoreFailure::parse_wire(parts[3])?,
-    ))
+    Some((parts[1], parts[2], RestoreFailure::parse_wire(parts[3])?))
 }
 
 fn capture_control_error(error: CaptureJobError) -> io::Error {
@@ -1723,12 +1708,7 @@ mod tests {
             )
             .unwrap();
         captures
-            .submit_result(
-                capture_job_id,
-                source_id,
-                opaque.to_vec(),
-                now,
-            )
+            .submit_result(capture_job_id, source_id, opaque.to_vec(), now)
             .unwrap();
         let export = captures.terminal_export(capture_job_id, now).unwrap();
         let machine_library = MachineSnapshotLibrary::new(&root);
@@ -1738,16 +1718,14 @@ mod tests {
 
         let worker = thread::spawn(move || server.serve_n(3).unwrap());
 
-        let registration_body = format!(
-            "{BROWSER_WIRE_PREFIX}\n{destination_id}\nchrome\n140.0\ncapture,restore"
-        );
+        let registration_body =
+            format!("{BROWSER_WIRE_PREFIX}\n{destination_id}\nchrome\n140.0\ncapture,restore");
         let registration = format!(
             "POST /v1/browser/register HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{registration_body}",
             registration_body.len()
         );
         assert!(
-            request(address, registration.as_bytes())
-                .starts_with(b"HTTP/1.1 204 No Content\r\n")
+            request(address, registration.as_bytes()).starts_with(b"HTTP/1.1 204 No Content\r\n")
         );
 
         let job = restore_control
@@ -1755,11 +1733,7 @@ mod tests {
             .unwrap();
         assert_eq!(job.targets.len(), 1);
         assert_eq!(
-            job.targets[0]
-                .destination
-                .as_ref()
-                .unwrap()
-                .instance_id,
+            job.targets[0].destination.as_ref().unwrap().instance_id,
             destination_id
         );
 
@@ -1772,22 +1746,14 @@ mod tests {
         assert!(assignment.starts_with(b"HTTP/1.1 200 OK\r\n"));
         assert_eq!(response_body(&assignment), opaque);
         let assignment_text = String::from_utf8_lossy(&assignment);
-        assert!(assignment_text.contains(&format!(
-            "X-TabSnap-Restore-Job: {}\r\n",
-            job.job_id
-        )));
-        assert!(assignment_text.contains(&format!(
-            "X-TabSnap-Source-Instance: {source_id}\r\n"
-        )));
+        assert!(assignment_text.contains(&format!("X-TabSnap-Restore-Job: {}\r\n", job.job_id)));
+        assert!(assignment_text.contains(&format!("X-TabSnap-Source-Instance: {source_id}\r\n")));
         assert!(assignment_text.contains("X-TabSnap-Source-Browser: chrome\r\n"));
         assert!(assignment_text.contains(
             "Access-Control-Expose-Headers: X-TabSnap-Restore-Job, X-TabSnap-Source-Instance, X-TabSnap-Source-Browser\r\n"
         ));
 
-        let result_body = format!(
-            "{RESTORE_WIRE_PREFIX}\n{destination_id}\n{}",
-            job.job_id
-        );
+        let result_body = format!("{RESTORE_WIRE_PREFIX}\n{destination_id}\n{}", job.job_id);
         let result = format!(
             "POST /v1/browser/restore/result HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{result_body}",
             result_body.len()
@@ -1818,10 +1784,7 @@ mod tests {
 
         let response = request(address, status.as_bytes());
         assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
-        assert!(
-            String::from_utf8_lossy(response_body(&response))
-                .contains("\"restoreVersion\":1")
-        );
+        assert!(String::from_utf8_lossy(response_body(&response)).contains("\"restoreVersion\":1"));
 
         worker.join().unwrap();
         if root.exists() {

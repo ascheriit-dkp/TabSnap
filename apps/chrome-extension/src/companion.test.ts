@@ -246,42 +246,44 @@ describe('CompanionClient', () => {
   });
 
   it('rejects oversized or malformed coordinated restore assignments', async () => {
-    const oversizedFetch = vi.fn(async () =>
-      new Response(new Uint8Array([1]), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'Content-Length': String(MAX_COMPANION_SNAPSHOT_BYTES + 1),
-          'X-TabSnap-Restore-Job': '22222222222222222222222222222222',
-          'X-TabSnap-Source-Instance': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          'X-TabSnap-Source-Browser': 'chrome',
-        },
-      }),
+    const oversizedFetch = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1]), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': String(MAX_COMPANION_SNAPSHOT_BYTES + 1),
+            'X-TabSnap-Restore-Job': '22222222222222222222222222222222',
+            'X-TabSnap-Source-Instance': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'X-TabSnap-Source-Browser': 'chrome',
+          },
+        }),
     );
     const oversizedClient = new CompanionClient(parseCompanionPairingCode(PAIRING), {
       fetchImpl: oversizedFetch,
     });
-    await expect(
-      oversizedClient.pollRestore('0123456789abcdef0123456789abcdef'),
-    ).rejects.toThrow('size limit');
+    await expect(oversizedClient.pollRestore('0123456789abcdef0123456789abcdef')).rejects.toThrow(
+      'size limit',
+    );
 
-    const malformedFetch = vi.fn(async () =>
-      new Response(new Uint8Array([1, 2, 3]), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'X-TabSnap-Restore-Job': '22222222222222222222222222222222',
-          'X-TabSnap-Source-Instance': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          'X-TabSnap-Source-Browser': 'safari',
-        },
-      }),
+    const malformedFetch = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-TabSnap-Restore-Job': '22222222222222222222222222222222',
+            'X-TabSnap-Source-Instance': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'X-TabSnap-Source-Browser': 'safari',
+          },
+        }),
     );
     const malformedClient = new CompanionClient(parseCompanionPairingCode(PAIRING), {
       fetchImpl: malformedFetch,
     });
-    await expect(
-      malformedClient.pollRestore('0123456789abcdef0123456789abcdef'),
-    ).rejects.toThrow('invalid restore assignment');
+    await expect(malformedClient.pollRestore('0123456789abcdef0123456789abcdef')).rejects.toThrow(
+      'invalid restore assignment',
+    );
   });
 
   it('registers browser presence and sends heartbeats', async () => {
