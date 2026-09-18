@@ -1,4 +1,5 @@
 name: Format M32
+# rerun after TypeScript fix
 
 on:
   push:
