@@ -12,6 +12,7 @@ import {
   currentBrowser,
   currentBrowserRuntime,
   restoreWorkspace,
+  type RestoreReport,
 } from './browser.js';
 import { requestCompanionDataConsent } from './companion-consent.js';
 import {
@@ -19,9 +20,11 @@ import {
   COMPANION_CAPTURE_VERSION,
   COMPANION_COORDINATION_VERSION,
   COMPANION_ORIGIN_PERMISSION,
+  COMPANION_RESTORE_VERSION,
   createCompanionBrowserInstanceId,
   parseCompanionPairingCode,
   type CompanionCaptureFailure,
+  type CompanionRestoreFailure,
 } from './companion.js';
 import { assessCrossBrowserCompatibility } from './cross-browser.js';
 import './style.css';
@@ -60,11 +63,14 @@ let currentSnapshot: TabSnapSnapshot | undefined;
 let companionClient: CompanionClient | undefined;
 let companionHeartbeatTimer: number | undefined;
 let companionCaptureTimer: number | undefined;
+let companionRestoreTimer: number | undefined;
 let companionBrowserInstanceId: string | undefined;
 let companionCaptureInFlight = false;
+let companionRestoreInFlight = false;
 let busy = false;
 
 const COMPANION_CAPTURE_POLL_MS = 1_500;
+const COMPANION_RESTORE_POLL_MS = 1_500;
 
 type PendingCaptureOutcome =
   | {
@@ -81,6 +87,21 @@ type PendingCaptureOutcome =
     };
 
 let companionPendingCaptureOutcome: PendingCaptureOutcome | undefined;
+
+type PendingRestoreOutcome =
+  | {
+      kind: 'success';
+      instanceId: string;
+      jobId: string;
+    }
+  | {
+      kind: 'failure';
+      instanceId: string;
+      jobId: string;
+      reason: CompanionRestoreFailure;
+    };
+
+let companionPendingRestoreOutcome: PendingRestoreOutcome | undefined;
 
 function syncButtons(): void {
   const hasSnapshot = currentSnapshot !== undefined;
@@ -151,6 +172,31 @@ function showSnapshot(snapshot: TabSnapSnapshot, origin: string): void {
   syncButtons();
 }
 
+function restoreReportLines(snapshot: TabSnapSnapshot, report: RestoreReport): string[] {
+  const lines = [
+    `Restored ${report.createdWindows} window${report.createdWindows === 1 ? '' : 's'} and ${report.createdTabs} tab${report.createdTabs === 1 ? '' : 's'}.`,
+    report.skippedTabs === 0
+      ? 'No tabs were skipped.'
+      : `${report.skippedTabs} tab${report.skippedTabs === 1 ? '' : 's'} skipped.`,
+  ];
+  const compatibility = assessCrossBrowserCompatibility(snapshot, currentBrowser());
+
+  if (compatibility.crossBrowser) {
+    lines.push(
+      '',
+      `Cross-browser restore: best effort (${compatibility.source} → ${compatibility.target}).`,
+      ...compatibility.notes,
+    );
+  }
+
+  if (report.warnings.length > 0) {
+    lines.push('', 'Warnings:', ...report.warnings.slice(0, 8));
+    if (report.warnings.length > 8) lines.push(`…and ${report.warnings.length - 8} more.`);
+  }
+
+  return lines;
+}
+
 function password(): string {
   return passwordInput.value;
 }
@@ -193,8 +239,13 @@ function stopCompanionPresence(): void {
     window.clearInterval(companionCaptureTimer);
     companionCaptureTimer = undefined;
   }
+  if (companionRestoreTimer !== undefined) {
+    window.clearInterval(companionRestoreTimer);
+    companionRestoreTimer = undefined;
+  }
   companionBrowserInstanceId = undefined;
   companionPendingCaptureOutcome = undefined;
+  companionPendingRestoreOutcome = undefined;
 }
 
 async function submitPendingCaptureOutcome(
@@ -209,7 +260,13 @@ async function submitPendingCaptureOutcome(
 }
 
 async function pollCompanionCapture(client: CompanionClient, instanceId: string): Promise<void> {
-  if (companionCaptureInFlight || busy || companionBrowserInstanceId !== instanceId) return;
+  if (
+    companionCaptureInFlight ||
+    companionRestoreInFlight ||
+    busy ||
+    companionBrowserInstanceId !== instanceId
+  )
+    return;
   companionCaptureInFlight = true;
   let claimed = false;
 
@@ -230,7 +287,7 @@ async function pollCompanionCapture(client: CompanionClient, instanceId: string)
     }
 
     const assignment = await client.pollCapture(instanceId);
-    if (assignment === undefined || companionBrowserInstanceId !== instanceId) return;
+    if (assignment === undefined || busy || companionBrowserInstanceId !== instanceId) return;
 
     claimed = true;
     busy = true;
@@ -333,6 +390,159 @@ async function pollCompanionCapture(client: CompanionClient, instanceId: string)
   }
 }
 
+async function submitPendingRestoreOutcome(
+  client: CompanionClient,
+  outcome: PendingRestoreOutcome,
+): Promise<void> {
+  if (outcome.kind === 'success') {
+    await client.submitRestoreSuccess(outcome.instanceId, outcome.jobId);
+  } else {
+    await client.submitRestoreFailure(outcome.instanceId, outcome.jobId, outcome.reason);
+  }
+}
+
+async function pollCompanionRestore(client: CompanionClient, instanceId: string): Promise<void> {
+  if (
+    companionCaptureInFlight ||
+    companionRestoreInFlight ||
+    busy ||
+    companionBrowserInstanceId !== instanceId
+  )
+    return;
+
+  companionRestoreInFlight = true;
+  let claimed = false;
+
+  try {
+    const pending = companionPendingRestoreOutcome;
+    if (pending !== undefined && pending.instanceId === instanceId) {
+      await submitPendingRestoreOutcome(client, pending);
+      if (companionBrowserInstanceId === instanceId && companionPendingRestoreOutcome === pending) {
+        companionPendingRestoreOutcome = undefined;
+        setStatus(
+          pending.kind === 'success'
+            ? `Whole-machine restore ${pending.jobId} completion acknowledged by the companion.`
+            : `Whole-machine restore ${pending.jobId} failure reported to the companion.`,
+          pending.kind === 'success' ? 'success' : 'info',
+        );
+      }
+      return;
+    }
+
+    const assignment = await client.pollRestore(instanceId);
+    if (assignment === undefined || busy || companionBrowserInstanceId !== instanceId) return;
+
+    claimed = true;
+    busy = true;
+    syncButtons();
+    setStatus(
+      `Whole-machine restore ${assignment.jobId}: encrypted browser payload received; decrypting locally…`,
+    );
+
+    const restorePassword = password();
+    let outcome: PendingRestoreOutcome | undefined;
+    let restoredLines: string[] | undefined;
+
+    if (restorePassword.length < MIN_PASSWORD_LENGTH) {
+      outcome = {
+        kind: 'failure',
+        instanceId,
+        jobId: assignment.jobId,
+        reason: 'password-required',
+      };
+    } else {
+      let snapshot: TabSnapSnapshot | undefined;
+      try {
+        snapshot = await decryptSnapshot(assignment.encrypted, restorePassword);
+      } catch {
+        outcome = {
+          kind: 'failure',
+          instanceId,
+          jobId: assignment.jobId,
+          reason: 'decrypt-failed',
+        };
+      }
+
+      if (snapshot !== undefined) {
+        try {
+          const report = await restoreWorkspace(snapshot);
+          restoredLines = restoreReportLines(snapshot, report);
+          outcome = {
+            kind: 'success',
+            instanceId,
+            jobId: assignment.jobId,
+          };
+        } catch {
+          outcome = {
+            kind: 'failure',
+            instanceId,
+            jobId: assignment.jobId,
+            reason: 'restore-failed',
+          };
+        }
+      }
+    }
+
+    if (outcome === undefined) {
+      throw new Error('Coordinated restore produced no bounded outcome.');
+    }
+
+    companionPendingRestoreOutcome = outcome;
+    try {
+      await submitPendingRestoreOutcome(client, outcome);
+      if (companionPendingRestoreOutcome === outcome) {
+        companionPendingRestoreOutcome = undefined;
+      }
+
+      if (outcome.kind === 'success') {
+        setStatus(
+          [
+            `Whole-machine restore ${assignment.jobId} completed locally. The companion only supplied encrypted bytes.`,
+            ...(restoredLines ?? []),
+          ].join('\n'),
+          restoredLines?.some((line) => line === 'Warnings:') === true ? 'info' : 'success',
+        );
+      } else {
+        switch (outcome.reason) {
+          case 'password-required':
+            setStatus(
+              'Whole-machine restore needs an encryption password in this browser page. Enter it before retrying this restore job.',
+              'info',
+            );
+            break;
+          case 'decrypt-failed':
+            setStatus(
+              'Whole-machine restore could not decrypt this browser payload locally. Check the password before retrying.',
+              'error',
+            );
+            break;
+          case 'restore-failed':
+            setStatus(
+              `Whole-machine restore ${assignment.jobId} failed before the workspace could be accepted as restored.`,
+              'error',
+            );
+            break;
+        }
+      }
+    } catch {
+      setStatus(
+        outcome.kind === 'success'
+          ? 'Workspace restored locally; the completion acknowledgement is held in memory and will retry submission.'
+          : 'Whole-machine restore failure report is held in memory and will retry submission.',
+        'info',
+      );
+    }
+  } catch {
+    // Polling failures are transient. Heartbeats and snapshot-library mode stay independent.
+  } finally {
+    if (claimed) {
+      busy = false;
+      syncButtons();
+    }
+    companionRestoreInFlight = false;
+  }
+}
+
 async function startCompanionPresence(
   client: CompanionClient,
   companionStatus: Awaited<ReturnType<CompanionClient['status']>>,
@@ -377,6 +587,12 @@ async function startCompanionPresence(
       void pollCompanionCapture(client, registration.instanceId);
     }, COMPANION_CAPTURE_POLL_MS);
     void pollCompanionCapture(client, registration.instanceId);
+  }
+  if (companionStatus.restoreVersion === COMPANION_RESTORE_VERSION) {
+    companionRestoreTimer = window.setInterval(() => {
+      void pollCompanionRestore(client, registration.instanceId);
+    }, COMPANION_RESTORE_POLL_MS);
+    void pollCompanionRestore(client, registration.instanceId);
   }
   return true;
 }
@@ -521,18 +737,7 @@ restoreButton.addEventListener('click', () => {
   void run('Restoring workspace', async () => {
     if (currentSnapshot === undefined) throw new Error('Capture or import a snapshot first.');
     const report = await restoreWorkspace(currentSnapshot);
-    const lines = [
-      `Restored ${report.createdWindows} window${report.createdWindows === 1 ? '' : 's'} and ${report.createdTabs} tab${report.createdTabs === 1 ? '' : 's'}.`,
-      report.skippedTabs === 0
-        ? 'No tabs were skipped.'
-        : `${report.skippedTabs} tab${report.skippedTabs === 1 ? '' : 's'} skipped.`,
-    ];
-
-    if (report.warnings.length > 0) {
-      lines.push('', 'Warnings:', ...report.warnings.slice(0, 8));
-      if (report.warnings.length > 8) lines.push(`…and ${report.warnings.length - 8} more.`);
-    }
-
+    const lines = restoreReportLines(currentSnapshot, report);
     setStatus(lines.join('\n'), report.warnings.length === 0 ? 'success' : 'info');
   });
 });
@@ -566,12 +771,15 @@ companionConnectButton.addEventListener('click', () => {
     companionPairing.value = '';
     await refreshCompanionLibrary(client);
     const captureActive = companionStatus.captureVersion === COMPANION_CAPTURE_VERSION;
+    const restoreActive = companionStatus.restoreVersion === COMPANION_RESTORE_VERSION;
+    const activeFeatures = [
+      captureActive ? 'capture' : undefined,
+      restoreActive ? 'restore' : undefined,
+    ].filter((feature): feature is string => feature !== undefined);
     const coordinationNote = coordinationActive
-      ? ` This browser is registered ephemerally for whole-machine coordination.${
-          captureActive
-            ? ' Coordinated capture polling is active while this page stays open.'
-            : ' This companion does not advertise coordinated capture yet.'
-        }`
+      ? activeFeatures.length > 0
+        ? ` This browser is registered ephemerally for whole-machine coordination. Coordinated ${activeFeatures.join(' and ')} polling is active while this page stays open.`
+        : ' This browser is registered ephemerally, but this companion does not advertise coordinated capture or restore yet.'
       : ' This companion does not advertise whole-machine coordination; snapshot-library mode still works.';
     setStatus(
       browser === 'firefox'

@@ -3,6 +3,7 @@ pub mod coordination;
 pub mod library;
 pub mod machine;
 pub mod protocol;
+pub mod restore;
 pub mod ui;
 
 use std::env;
@@ -17,6 +18,7 @@ use capture::{CaptureJobStatus, CaptureTargetStateView};
 use library::SnapshotLibrary;
 use machine::MachineSnapshotLibrary;
 use protocol::ProtocolServer;
+use restore::{RestoreJobStatus, RestoreSkip, RestoreTargetStateView};
 use tabsnap_companion::{
     PortableLayout, ResolvedStorage, StorageMode, activate_storage, load_storage_mode,
     resolve_storage, validate_storage_dir,
@@ -31,6 +33,7 @@ fn print_help() {
     println!("  tabsnap-companion ui");
     println!("  tabsnap-companion serve");
     println!("  tabsnap-companion capture");
+    println!("  tabsnap-companion restore <file-name.tabsnap-machine>");
     println!("  tabsnap-companion storage show");
     println!("  tabsnap-companion storage set portable");
     println!("  tabsnap-companion storage set local");
@@ -212,6 +215,120 @@ fn run_capture_command(layout: &PortableLayout) -> Result<(), Box<dyn Error>> {
     }
 }
 
+fn print_restore_status(status: &RestoreJobStatus) {
+    for target in &status.targets {
+        let destination = target
+            .destination
+            .as_ref()
+            .map(|instance| format!("{} {}", instance.browser.as_str(), instance.instance_id))
+            .unwrap_or_else(|| "-".to_owned());
+        let state = match target.state {
+            RestoreTargetStateView::Pending => "pending".to_owned(),
+            RestoreTargetStateView::Claimed => "restoring".to_owned(),
+            RestoreTargetStateView::Complete => "complete".to_owned(),
+            RestoreTargetStateView::Failed { reason } => {
+                format!("failed ({})", reason.as_str())
+            }
+            RestoreTargetStateView::Skipped { reason } => {
+                format!("skipped ({})", reason.as_str())
+            }
+        };
+        println!(
+            "{} {} -> {}\t{}",
+            target.source_browser.as_str(),
+            target.source_instance_id,
+            destination,
+            state
+        );
+    }
+}
+
+fn restore_has_retryable_targets(status: &RestoreJobStatus) -> bool {
+    status.targets.iter().any(|target| {
+        matches!(
+            target.state,
+            RestoreTargetStateView::Failed { .. }
+                | RestoreTargetStateView::Skipped {
+                    reason: RestoreSkip::BrowserUnavailable
+                }
+        )
+    })
+}
+
+fn run_restore_command(layout: &PortableLayout, args: &[String]) -> Result<(), Box<dyn Error>> {
+    let file_name = args
+        .get(2)
+        .ok_or("Restore requires a .tabsnap-machine library file name.")?;
+    let library = snapshot_library(layout)?;
+    validate_storage_dir(library.root())?;
+    let server = ProtocolServer::bind(library)?;
+    let control = server.restore_control();
+
+    println!("TabSnap coordinated restore v1");
+    println!("endpoint: {}", server.endpoint()?);
+    println!("pairing-code: {}", server.pairing_code()?);
+    println!("machine snapshot: {file_name}");
+    println!("Connect the browser pages you want available for restore, then press Enter.");
+
+    thread::spawn(move || {
+        if let Err(error) = server.serve_forever() {
+            eprintln!("TabSnap Companion protocol error: {error}");
+        }
+    });
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let created = control.create_restore_job(file_name)?;
+    let job_id = created.job_id.clone();
+    println!("restore-job: {job_id}");
+    print_restore_status(&created);
+
+    let mut previous = created;
+    loop {
+        loop {
+            thread::sleep(Duration::from_millis(250));
+            let Some(current) = control.restore_job_status(&job_id)? else {
+                return Err("Restore job expired before completion.".into());
+            };
+            if current != previous {
+                println!();
+                print_restore_status(&current);
+            }
+            if current.is_terminal() {
+                previous = current;
+                break;
+            }
+            previous = current;
+        }
+
+        println!();
+        println!(
+            "restore attempt complete: {} succeeded, {} failed, {} skipped",
+            previous.completed_count(),
+            previous.failed_count(),
+            previous.skipped_count()
+        );
+
+        if !restore_has_retryable_targets(&previous) {
+            return Ok(());
+        }
+
+        println!(
+            "Press Enter to retry failed or browser-unavailable targets after connecting browsers; type q and Enter to stop."
+        );
+        input.clear();
+        io::stdin().read_line(&mut input)?;
+        if input.trim().eq_ignore_ascii_case("q") {
+            return Ok(());
+        }
+
+        previous = control.retry_restore_job(&job_id)?;
+        println!();
+        println!("retrying restore job: {job_id}");
+        print_restore_status(&previous);
+    }
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     let command = args.get(1).map(String::as_str).unwrap_or("info");
@@ -229,6 +346,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         "ui" => ui::run()?,
         "serve" => serve(&layout)?,
         "capture" => run_capture_command(&layout)?,
+        "restore" => run_restore_command(&layout, &args)?,
         "storage" => match args.get(2).map(String::as_str) {
             Some("show") => {
                 let mode = load_storage_mode(&layout)?;
