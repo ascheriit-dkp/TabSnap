@@ -440,7 +440,7 @@ async function pollCompanionRestore(client: CompanionClient, instanceId: string)
     );
 
     const restorePassword = password();
-    let outcome: PendingRestoreOutcome;
+    let outcome: PendingRestoreOutcome | undefined;
     let restoredLines: string[] | undefined;
 
     if (restorePassword.length < MIN_PASSWORD_LENGTH) {
@@ -483,6 +483,10 @@ async function pollCompanionRestore(client: CompanionClient, instanceId: string)
       }
     }
 
+    if (outcome === undefined) {
+      throw new Error('Coordinated restore produced no bounded outcome.');
+    }
+
     companionPendingRestoreOutcome = outcome;
     try {
       await submitPendingRestoreOutcome(client, outcome);
@@ -498,21 +502,27 @@ async function pollCompanionRestore(client: CompanionClient, instanceId: string)
           ].join('\n'),
           restoredLines?.some((line) => line === 'Warnings:') === true ? 'info' : 'success',
         );
-      } else if (outcome.reason === 'password-required') {
-        setStatus(
-          'Whole-machine restore needs an encryption password in this browser page. Enter it before retrying this restore job.',
-          'info',
-        );
-      } else if (outcome.reason === 'decrypt-failed') {
-        setStatus(
-          'Whole-machine restore could not decrypt this browser payload locally. Check the password before retrying.',
-          'error',
-        );
       } else {
-        setStatus(
-          `Whole-machine restore ${assignment.jobId} failed before the workspace could be accepted as restored.`,
-          'error',
-        );
+        switch (outcome.reason) {
+          case 'password-required':
+            setStatus(
+              'Whole-machine restore needs an encryption password in this browser page. Enter it before retrying this restore job.',
+              'info',
+            );
+            break;
+          case 'decrypt-failed':
+            setStatus(
+              'Whole-machine restore could not decrypt this browser payload locally. Check the password before retrying.',
+              'error',
+            );
+            break;
+          case 'restore-failed':
+            setStatus(
+              `Whole-machine restore ${assignment.jobId} failed before the workspace could be accepted as restored.`,
+              'error',
+            );
+            break;
+        }
       }
     } catch {
       setStatus(
