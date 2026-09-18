@@ -1,0 +1,36 @@
+name: Format M32
+
+on:
+  push:
+    branches:
+      - feat/level4-coordinated-restore
+    paths:
+      - .github/workflows/format-m32.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/level4-coordinated-restore
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm prettier --write apps/chrome-extension/src/companion.ts apps/chrome-extension/src/companion.test.ts apps/chrome-extension/src/main.ts
+      - run: cargo fmt --manifest-path apps/windows-companion/Cargo.toml
+      - name: Commit formatting
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/chrome-extension/src/companion.ts apps/chrome-extension/src/companion.test.ts apps/chrome-extension/src/main.ts apps/windows-companion/src/protocol.rs apps/windows-companion/src/restore.rs apps/windows-companion/src/main.rs
+          git diff --cached --quiet || git commit -m "style: format M32 implementation"
+          git push origin HEAD:feat/level4-coordinated-restore
