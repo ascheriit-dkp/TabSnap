@@ -1699,6 +1699,137 @@ mod tests {
     }
 
     #[test]
+    fn coordinates_restore_with_opaque_payload_and_completion_ack() {
+        let (server, root) = test_server("restore-job");
+        let restore_control = server.restore_control();
+        let address = server.local_addr().unwrap();
+
+        let source_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let destination_id = "0123456789abcdef0123456789abcdef";
+        let capture_job_id = "99999999999999999999999999999999";
+        let opaque = b"opaque-encrypted-restore-payload";
+        let now = Instant::now();
+        let mut captures = CaptureJobStore::default();
+        captures
+            .create(
+                capture_job_id.to_owned(),
+                vec![crate::coordination::BrowserInstance {
+                    instance_id: source_id.to_owned(),
+                    browser: BrowserKind::Chrome,
+                    version: Some("140.0".to_owned()),
+                    capabilities: vec![BrowserCapability::Capture, BrowserCapability::Restore],
+                }],
+                now,
+            )
+            .unwrap();
+        captures
+            .submit_result(
+                capture_job_id,
+                source_id,
+                opaque.to_vec(),
+                now,
+            )
+            .unwrap();
+        let export = captures.terminal_export(capture_job_id, now).unwrap();
+        let machine_library = MachineSnapshotLibrary::new(&root);
+        let machine = machine_library
+            .write_capture_job("restore-protocol", &export)
+            .unwrap();
+
+        let worker = thread::spawn(move || server.serve_n(3).unwrap());
+
+        let registration_body = format!(
+            "{BROWSER_WIRE_PREFIX}\n{destination_id}\nchrome\n140.0\ncapture,restore"
+        );
+        let registration = format!(
+            "POST /v1/browser/register HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{registration_body}",
+            registration_body.len()
+        );
+        assert!(
+            request(address, registration.as_bytes())
+                .starts_with(b"HTTP/1.1 204 No Content\r\n")
+        );
+
+        let job = restore_control
+            .create_restore_job(&machine.file_name)
+            .unwrap();
+        assert_eq!(job.targets.len(), 1);
+        assert_eq!(
+            job.targets[0]
+                .destination
+                .as_ref()
+                .unwrap()
+                .instance_id,
+            destination_id
+        );
+
+        let poll_body = format!("{RESTORE_WIRE_PREFIX}\n{destination_id}");
+        let poll = format!(
+            "POST /v1/browser/restore/poll HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{poll_body}",
+            poll_body.len()
+        );
+        let assignment = request(address, poll.as_bytes());
+        assert!(assignment.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert_eq!(response_body(&assignment), opaque);
+        let assignment_text = String::from_utf8_lossy(&assignment);
+        assert!(assignment_text.contains(&format!(
+            "X-TabSnap-Restore-Job: {}\r\n",
+            job.job_id
+        )));
+        assert!(assignment_text.contains(&format!(
+            "X-TabSnap-Source-Instance: {source_id}\r\n"
+        )));
+        assert!(assignment_text.contains("X-TabSnap-Source-Browser: chrome\r\n"));
+        assert!(assignment_text.contains(
+            "Access-Control-Expose-Headers: X-TabSnap-Restore-Job, X-TabSnap-Source-Instance, X-TabSnap-Source-Browser\r\n"
+        ));
+
+        let result_body = format!(
+            "{RESTORE_WIRE_PREFIX}\n{destination_id}\n{}",
+            job.job_id
+        );
+        let result = format!(
+            "POST /v1/browser/restore/result HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{result_body}",
+            result_body.len()
+        );
+        assert!(request(address, result.as_bytes()).starts_with(b"HTTP/1.1 204 No Content\r\n"));
+
+        let status = restore_control
+            .restore_job_status(&job.job_id)
+            .unwrap()
+            .unwrap();
+        assert!(status.is_terminal());
+        assert_eq!(status.completed_count(), 1);
+        assert_eq!(status.failed_count(), 0);
+        assert_eq!(status.skipped_count(), 0);
+
+        worker.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn status_advertises_restore_version() {
+        let (server, root) = test_server("restore-version");
+        let address = server.local_addr().unwrap();
+        let worker = thread::spawn(move || server.serve_n(1).unwrap());
+        let status = format!(
+            "GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {TEST_TOKEN}\r\nConnection: close\r\n\r\n"
+        );
+
+        let response = request(address, status.as_bytes());
+        assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert!(
+            String::from_utf8_lossy(response_body(&response))
+                .contains("\"restoreVersion\":1")
+        );
+
+        worker.join().unwrap();
+        if root.exists() {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn rejects_browser_registration_without_extension_origin() {
         let (server, root) = test_server("browser-origin");
         let address = server.local_addr().unwrap();
