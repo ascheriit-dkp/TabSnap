@@ -8,6 +8,6 @@
     "@tabsnap/core": "workspace:*",
     "@tabsnap/schema": "workspace:*",
     "hash-wasm": "4.12.0",
-    "zod": "4.5.4"
+    "zod": "4.6.5"
   }
 }
