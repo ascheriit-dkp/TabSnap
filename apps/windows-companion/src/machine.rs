@@ -353,6 +353,7 @@ fn parse_manifest(bytes: &[u8], payload_start: u64) -> io::Result<MachineManifes
     let mut seen = HashSet::new();
     let mut payload_offset = payload_start;
     let mut payload_total = 0_u64;
+    let mut complete_targets = 0_usize;
     let mut targets = Vec::with_capacity(target_count);
     for _ in 0..target_count {
         let instance_id = encode_hex_128(cursor.array_16()?);
@@ -377,6 +378,7 @@ fn parse_manifest(bytes: &[u8], payload_start: u64) -> io::Result<MachineManifes
 
         let state = match cursor.u8()? {
             1 => {
+                complete_targets += 1;
                 let payload_len = cursor.u32()? as u64;
                 if payload_len == 0 || payload_len > MAX_CAPTURE_RESULT_BYTES as u64 {
                     return Err(invalid_data("Encrypted browser payload size is invalid."));
@@ -411,6 +413,11 @@ fn parse_manifest(bytes: &[u8], payload_start: u64) -> io::Result<MachineManifes
     }
     if !cursor.finished() {
         return Err(invalid_data("Machine snapshot manifest has trailing data."));
+    }
+    if complete_targets == 0 {
+        return Err(invalid_data(
+            "Machine snapshot requires at least one encrypted browser payload.",
+        ));
     }
 
     Ok(MachineManifest {
@@ -925,6 +932,25 @@ mod tests {
         );
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_manifest_without_any_successful_payload() {
+        let mut manifest = Vec::new();
+        manifest.extend_from_slice(&0_u64.to_be_bytes());
+        manifest.extend_from_slice(&decode_hex_128(JOB_ID).unwrap());
+        manifest.extend_from_slice(&1_u16.to_be_bytes());
+        manifest.extend_from_slice(&decode_hex_128(CHROME_ID).unwrap());
+        manifest.push(browser_code(BrowserKind::Chrome));
+        manifest.push(0);
+        manifest.push(2);
+        manifest.push(failure_code(CaptureFailure::PasswordRequired));
+
+        let payload_start = (PREFIX_BYTES + manifest.len()) as u64;
+        assert_eq!(
+            parse_manifest(&manifest, payload_start).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
