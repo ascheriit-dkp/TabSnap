@@ -17,6 +17,9 @@ use crate::coordination::{
 };
 use crate::library::{MAX_SNAPSHOT_FILE_BYTES, SnapshotLibrary};
 use crate::machine::{MachineSnapshotEntry, MachineSnapshotLibrary};
+use crate::restore::{
+    RESTORE_VERSION, RestoreFailure, RestoreJobError, RestoreJobStatus, RestoreJobStore,
+};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 const TOKEN_BYTES: usize = 32;
@@ -26,15 +29,18 @@ const CHROME_EXTENSION_PREFIX: &str = "chrome-extension://";
 const FIREFOX_EXTENSION_PREFIX: &str = "moz-extension://";
 const BROWSER_WIRE_PREFIX: &str = "tabsnap-browser:v1";
 const CAPTURE_WIRE_PREFIX: &str = "tabsnap-capture:v1";
+const RESTORE_WIRE_PREFIX: &str = "tabsnap-restore:v1";
 const MAX_COORDINATION_BODY_BYTES: u64 = 1024;
 
 #[derive(Debug)]
 pub struct ProtocolServer {
     listener: TcpListener,
     library: SnapshotLibrary,
+    machine_library: MachineSnapshotLibrary,
     token: String,
     registry: Arc<Mutex<BrowserRegistry>>,
     capture_jobs: Arc<Mutex<CaptureJobStore>>,
+    restore_jobs: Arc<Mutex<RestoreJobStore>>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +100,65 @@ impl CaptureControl {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct RestoreControl {
+    registry: Arc<Mutex<BrowserRegistry>>,
+    restore_jobs: Arc<Mutex<RestoreJobStore>>,
+    machine_library: MachineSnapshotLibrary,
+}
+
+impl RestoreControl {
+    pub fn create_restore_job(&self, file_name: &str) -> io::Result<RestoreJobStatus> {
+        let machine = self.machine_library.inspect(file_name)?;
+        let now = Instant::now();
+        let instances = self
+            .registry
+            .lock()
+            .map_err(|_| io::Error::other("Browser registry is unavailable."))?
+            .active(now);
+        let mut jobs = self
+            .restore_jobs
+            .lock()
+            .map_err(|_| io::Error::other("Restore job store is unavailable."))?;
+
+        for _ in 0..4 {
+            let job_id = generate_restore_job_id()?;
+            match jobs.create(job_id, &machine, instances.clone(), now) {
+                Ok(status) => return Ok(status),
+                Err(RestoreJobError::DuplicateJob) => continue,
+                Err(error) => return Err(restore_control_error(error)),
+            }
+        }
+
+        Err(io::Error::other(
+            "Unable to allocate a unique restore job id.",
+        ))
+    }
+
+    pub fn retry_restore_job(&self, job_id: &str) -> io::Result<RestoreJobStatus> {
+        let now = Instant::now();
+        let instances = self
+            .registry
+            .lock()
+            .map_err(|_| io::Error::other("Browser registry is unavailable."))?
+            .active(now);
+        let mut jobs = self
+            .restore_jobs
+            .lock()
+            .map_err(|_| io::Error::other("Restore job store is unavailable."))?;
+        jobs.retry(job_id, instances, now)
+            .map_err(restore_control_error)
+    }
+
+    pub fn restore_job_status(&self, job_id: &str) -> io::Result<Option<RestoreJobStatus>> {
+        let mut jobs = self
+            .restore_jobs
+            .lock()
+            .map_err(|_| io::Error::other("Restore job store is unavailable."))?;
+        Ok(jobs.status(job_id, Instant::now()))
+    }
+}
+
 impl ProtocolServer {
     pub fn bind(library: SnapshotLibrary) -> io::Result<Self> {
         Self::bind_with_token(library, generate_session_token()?)
@@ -108,12 +173,16 @@ impl ProtocolServer {
             ));
         }
 
+        let machine_library = MachineSnapshotLibrary::new(library.root().to_path_buf());
+
         Ok(Self {
             listener,
             library,
+            machine_library,
             token,
             registry: Arc::new(Mutex::new(BrowserRegistry::default())),
             capture_jobs: Arc::new(Mutex::new(CaptureJobStore::default())),
+            restore_jobs: Arc::new(Mutex::new(RestoreJobStore::default())),
         })
     }
 
@@ -133,6 +202,14 @@ impl ProtocolServer {
         CaptureControl {
             registry: Arc::clone(&self.registry),
             capture_jobs: Arc::clone(&self.capture_jobs),
+        }
+    }
+
+    pub fn restore_control(&self) -> RestoreControl {
+        RestoreControl {
+            registry: Arc::clone(&self.registry),
+            restore_jobs: Arc::clone(&self.restore_jobs),
+            machine_library: self.machine_library.clone(),
         }
     }
 
@@ -196,7 +273,7 @@ impl ProtocolServer {
             ("GET", "/v1/status") => HttpResponse::json(
                 200,
                 format!(
-                    "{{\"protocolVersion\":{PROTOCOL_VERSION},\"transport\":\"loopback-http\",\"authentication\":\"session-bearer\",\"coordinationVersion\":{COORDINATION_VERSION},\"browserLeaseSeconds\":{BROWSER_LEASE_SECONDS},\"captureVersion\":{CAPTURE_VERSION}}}"
+                    "{{\"protocolVersion\":{PROTOCOL_VERSION},\"transport\":\"loopback-http\",\"authentication\":\"session-bearer\",\"coordinationVersion\":{COORDINATION_VERSION},\"browserLeaseSeconds\":{BROWSER_LEASE_SECONDS},\"captureVersion\":{CAPTURE_VERSION},\"restoreVersion\":{RESTORE_VERSION}}}"
                 ),
             ),
             ("GET", "/v1/snapshots") => self.list_snapshots(),
@@ -217,6 +294,15 @@ impl ProtocolServer {
             }
             ("POST", "/v1/browser/capture/failure") => {
                 self.submit_capture_failure(&request, cors_origin.as_deref())
+            }
+            ("POST", "/v1/browser/restore/poll") => {
+                self.poll_restore(&request, cors_origin.as_deref())
+            }
+            ("POST", "/v1/browser/restore/result") => {
+                self.submit_restore_success(&request, cors_origin.as_deref())
+            }
+            ("POST", "/v1/browser/restore/failure") => {
+                self.submit_restore_failure(&request, cors_origin.as_deref())
             }
             _ => HttpResponse::json_error(404, "Unknown protocol endpoint."),
         };
@@ -458,6 +544,153 @@ impl ProtocolServer {
         }
     }
 
+    fn poll_restore(&self, request: &HttpRequest, origin: Option<&str>) -> HttpResponse {
+        let Some(origin) = origin else {
+            return HttpResponse::json_error(403, "Restore polling requires an extension origin.");
+        };
+        if !is_text_plain(request) {
+            return HttpResponse::json_error(415, "Restore polling must be text/plain.");
+        }
+        let Some(instance_id) = parse_restore_poll(&request.body) else {
+            return HttpResponse::json_error(400, "Restore poll is invalid.");
+        };
+        if let Err(response) = self.authorize_restore(instance_id, origin) {
+            return response;
+        }
+
+        let assignment = {
+            let Ok(mut jobs) = self.restore_jobs.lock() else {
+                return HttpResponse::json_error(500, "Restore job store is unavailable.");
+            };
+            jobs.next_assignment(instance_id, Instant::now())
+        };
+        let Some(assignment) = assignment else {
+            return HttpResponse::empty(204);
+        };
+
+        match self
+            .machine_library
+            .read_encrypted_payload(&assignment.machine_file_name, &assignment.source_instance_id)
+        {
+            Ok(bytes) => HttpResponse::binary(200, bytes)
+                .with_header("X-TabSnap-Restore-Job", assignment.job_id)
+                .with_header(
+                    "X-TabSnap-Source-Instance",
+                    assignment.source_instance_id,
+                )
+                .with_header(
+                    "X-TabSnap-Source-Browser",
+                    assignment.source_browser.as_str(),
+                ),
+            Err(_) => {
+                if let Ok(mut jobs) = self.restore_jobs.lock() {
+                    let _ = jobs.submit_failure(
+                        &assignment.job_id,
+                        instance_id,
+                        RestoreFailure::PayloadUnavailable,
+                        Instant::now(),
+                    );
+                }
+                HttpResponse::json_error(500, "Encrypted restore payload is unavailable.")
+            }
+        }
+    }
+
+    fn submit_restore_success(
+        &self,
+        request: &HttpRequest,
+        origin: Option<&str>,
+    ) -> HttpResponse {
+        let Some(origin) = origin else {
+            return HttpResponse::json_error(403, "Restore result requires an extension origin.");
+        };
+        if !is_text_plain(request) {
+            return HttpResponse::json_error(415, "Restore result must be text/plain.");
+        }
+        let Some((instance_id, job_id)) = parse_restore_success(&request.body) else {
+            return HttpResponse::json_error(400, "Restore result is invalid.");
+        };
+        if let Err(response) = self.authorize_restore(instance_id, origin) {
+            return response;
+        }
+
+        let Ok(mut jobs) = self.restore_jobs.lock() else {
+            return HttpResponse::json_error(500, "Restore job store is unavailable.");
+        };
+        match jobs.submit_success(job_id, instance_id, Instant::now()) {
+            Ok(()) => HttpResponse::empty(204),
+            Err(RestoreJobError::NotFound | RestoreJobError::TargetNotFound) => {
+                HttpResponse::json_error(404, "Restore job or target was not found.")
+            }
+            Err(RestoreJobError::AlreadyFinished) => {
+                HttpResponse::json_error(409, "Restore target is already finished.")
+            }
+            Err(_) => HttpResponse::json_error(400, "Restore result was rejected."),
+        }
+    }
+
+    fn submit_restore_failure(
+        &self,
+        request: &HttpRequest,
+        origin: Option<&str>,
+    ) -> HttpResponse {
+        let Some(origin) = origin else {
+            return HttpResponse::json_error(403, "Restore failure requires an extension origin.");
+        };
+        if !is_text_plain(request) {
+            return HttpResponse::json_error(415, "Restore failure must be text/plain.");
+        }
+        let Some((instance_id, job_id, reason)) = parse_restore_failure(&request.body) else {
+            return HttpResponse::json_error(400, "Restore failure is invalid.");
+        };
+        if let Err(response) = self.authorize_restore(instance_id, origin) {
+            return response;
+        }
+
+        let Ok(mut jobs) = self.restore_jobs.lock() else {
+            return HttpResponse::json_error(500, "Restore job store is unavailable.");
+        };
+        match jobs.submit_failure(job_id, instance_id, reason, Instant::now()) {
+            Ok(()) => HttpResponse::empty(204),
+            Err(RestoreJobError::NotFound | RestoreJobError::TargetNotFound) => {
+                HttpResponse::json_error(404, "Restore job or target was not found.")
+            }
+            Err(RestoreJobError::AlreadyFinished) => {
+                HttpResponse::json_error(409, "Restore target is already finished.")
+            }
+            Err(_) => HttpResponse::json_error(400, "Restore failure was rejected."),
+        }
+    }
+
+    fn authorize_restore(&self, instance_id: &str, origin: &str) -> Result<(), HttpResponse> {
+        let Ok(mut registry) = self.registry.lock() else {
+            return Err(HttpResponse::json_error(
+                500,
+                "Browser registry is unavailable.",
+            ));
+        };
+        match registry.authorize(
+            instance_id,
+            origin,
+            BrowserCapability::Restore,
+            Instant::now(),
+        ) {
+            AuthorizationResult::Allowed => Ok(()),
+            AuthorizationResult::NotFound => Err(HttpResponse::json_error(
+                404,
+                "Browser instance is not registered.",
+            )),
+            AuthorizationResult::OriginMismatch => Err(HttpResponse::json_error(
+                403,
+                "Browser instance belongs to another extension origin.",
+            )),
+            AuthorizationResult::MissingCapability => Err(HttpResponse::json_error(
+                409,
+                "Browser instance does not advertise restore capability.",
+            )),
+        }
+    }
+
     fn authenticated(&self, request: &HttpRequest) -> bool {
         let Some(value) = request.header("authorization") else {
             return false;
@@ -649,6 +882,11 @@ impl HttpResponse {
                     .to_owned(),
             ));
             self.headers.push((
+                "Access-Control-Expose-Headers".to_owned(),
+                "X-TabSnap-Restore-Job, X-TabSnap-Source-Instance, X-TabSnap-Source-Browser"
+                    .to_owned(),
+            ));
+            self.headers.push((
                 "Access-Control-Allow-Private-Network".to_owned(),
                 "true".to_owned(),
             ));
@@ -753,6 +991,9 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, RequestError> {
             | "/v1/browser/heartbeat"
             | "/v1/browser/capture/poll"
             | "/v1/browser/capture/failure"
+            | "/v1/browser/restore/poll"
+            | "/v1/browser/restore/result"
+            | "/v1/browser/restore/failure"
     ) {
         MAX_COORDINATION_BODY_BYTES
     } else if path == "/v1/browser/capture/result" {
@@ -840,6 +1081,9 @@ fn is_protocol_path(path: &str) -> bool {
             | "/v1/browser/capture/poll"
             | "/v1/browser/capture/result"
             | "/v1/browser/capture/failure"
+            | "/v1/browser/restore/poll"
+            | "/v1/browser/restore/result"
+            | "/v1/browser/restore/failure"
     )
 }
 
@@ -951,6 +1195,54 @@ fn parse_capture_failure(body: &[u8]) -> Option<(&str, &str, CaptureFailure)> {
     Some((parts[1], parts[2], CaptureFailure::parse(parts[3])?))
 }
 
+fn parse_restore_poll(body: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(body).ok()?;
+    if text.contains('\r') {
+        return None;
+    }
+    let parts = text.split('\n').collect::<Vec<_>>();
+    if parts.len() != 2 || parts[0] != RESTORE_WIRE_PREFIX || !valid_instance_id(parts[1]) {
+        return None;
+    }
+    Some(parts[1])
+}
+
+fn parse_restore_success(body: &[u8]) -> Option<(&str, &str)> {
+    let text = std::str::from_utf8(body).ok()?;
+    if text.contains('\r') {
+        return None;
+    }
+    let parts = text.split('\n').collect::<Vec<_>>();
+    if parts.len() != 3
+        || parts[0] != RESTORE_WIRE_PREFIX
+        || !valid_instance_id(parts[1])
+        || !valid_job_id(parts[2])
+    {
+        return None;
+    }
+    Some((parts[1], parts[2]))
+}
+
+fn parse_restore_failure(body: &[u8]) -> Option<(&str, &str, RestoreFailure)> {
+    let text = std::str::from_utf8(body).ok()?;
+    if text.contains('\r') {
+        return None;
+    }
+    let parts = text.split('\n').collect::<Vec<_>>();
+    if parts.len() != 4
+        || parts[0] != RESTORE_WIRE_PREFIX
+        || !valid_instance_id(parts[1])
+        || !valid_job_id(parts[2])
+    {
+        return None;
+    }
+    Some((
+        parts[1],
+        parts[2],
+        RestoreFailure::parse_wire(parts[3])?,
+    ))
+}
+
 fn capture_control_error(error: CaptureJobError) -> io::Error {
     match error {
         CaptureJobError::NoTargets => io::Error::new(
@@ -972,7 +1264,32 @@ fn capture_control_error(error: CaptureJobError) -> io::Error {
     }
 }
 
+fn restore_control_error(error: RestoreJobError) -> io::Error {
+    match error {
+        RestoreJobError::CapacityExceeded => io::Error::other("Restore job capacity is exhausted."),
+        RestoreJobError::NotFound => {
+            io::Error::new(io::ErrorKind::NotFound, "Restore job was not found.")
+        }
+        RestoreJobError::NoRetryableTargets => io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Restore job has no failed or unavailable targets to retry.",
+        ),
+        RestoreJobError::InvalidJobId | RestoreJobError::DuplicateJob => {
+            io::Error::other("Unable to allocate restore job.")
+        }
+        _ => io::Error::other("Restore job store rejected the operation."),
+    }
+}
+
 fn generate_capture_job_id() -> io::Result<String> {
+    generate_job_id()
+}
+
+fn generate_restore_job_id() -> io::Result<String> {
+    generate_job_id()
+}
+
+fn generate_job_id() -> io::Result<String> {
     let mut bytes = [0_u8; 16];
     fill_random(&mut bytes)?;
     let mut job_id = String::with_capacity(32);
