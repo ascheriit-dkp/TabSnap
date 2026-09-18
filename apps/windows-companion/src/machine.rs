@@ -523,12 +523,36 @@ fn safe_machine_name(suggested_name: &str) -> String {
         }
     }
     let trimmed = stem.trim_matches(|character: char| character == ' ' || character == '.');
-    let stem = if trimmed.is_empty() {
-        "machine"
+    let mut stem = if trimmed.is_empty() {
+        "machine".to_owned()
     } else {
-        trimmed
+        trimmed.to_owned()
     };
+    let reserved_candidate = stem
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches([' ', '.']);
+    if is_windows_reserved_name(reserved_candidate) {
+        stem.insert(0, '_');
+    }
     format!("{stem}{suffix}")
+}
+
+fn is_windows_reserved_name(value: &str) -> bool {
+    let upper = value.to_ascii_uppercase();
+    if matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+
+    for prefix in ["COM", "LPT"] {
+        if upper.strip_prefix(prefix).is_some_and(|number| {
+            matches!(number, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+        }) {
+            return true;
+        }
+    }
+    false
 }
 
 fn validate_library_file_name(file_name: &str) -> io::Result<()> {
@@ -817,6 +841,28 @@ mod tests {
         assert_ne!(first.path, second.path);
         assert_no_temp_files(&root);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sanitizes_windows_reserved_machine_names() {
+        for reserved in [
+            "CON", "prn", "AUX.txt", "nul", "COM1", "com9.backup", "LPT1", "lpt9.log",
+        ] {
+            let safe = safe_machine_name(reserved);
+            assert!(safe.starts_with('_'), "{reserved} -> {safe}");
+            assert!(safe.ends_with(".tabsnap-machine"));
+        }
+
+        assert_eq!(
+            safe_machine_name("COM10"),
+            "COM10.tabsnap-machine",
+            "COM10 is not a reserved Windows device name"
+        );
+        assert_eq!(
+            safe_machine_name("LPT0"),
+            "LPT0.tabsnap-machine",
+            "LPT0 is not a reserved Windows device name"
+        );
     }
 
     #[test]
