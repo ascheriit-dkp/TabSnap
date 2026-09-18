@@ -1,5 +1,5 @@
 name: Validate M32
-# rerun after formatting
+# rerun after TypeScript outcome fix
 
 on:
   push:
