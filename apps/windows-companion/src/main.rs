@@ -1,6 +1,7 @@
 pub mod capture;
 pub mod coordination;
 pub mod library;
+pub mod machine;
 pub mod protocol;
 pub mod ui;
 
@@ -14,6 +15,7 @@ use std::time::Duration;
 
 use capture::{CaptureJobStatus, CaptureTargetStateView};
 use library::SnapshotLibrary;
+use machine::MachineSnapshotLibrary;
 use protocol::ProtocolServer;
 use tabsnap_companion::{
     PortableLayout, ResolvedStorage, StorageMode, activate_storage, load_storage_mode,
@@ -154,6 +156,7 @@ fn print_capture_status(status: &CaptureJobStatus) {
 fn run_capture_command(layout: &PortableLayout) -> Result<(), Box<dyn Error>> {
     let library = snapshot_library(layout)?;
     validate_storage_dir(library.root())?;
+    let machine_library = MachineSnapshotLibrary::new(library.root().to_path_buf());
     let server = ProtocolServer::bind(library)?;
     let control = server.capture_control();
 
@@ -191,8 +194,17 @@ fn run_capture_command(layout: &PortableLayout) -> Result<(), Box<dyn Error>> {
                 current.completed_count(),
                 current.failed_count()
             );
+            if current.completed_count() == 0 {
+                return Err("Capture completed without any encrypted browser payloads.".into());
+            }
+            let suggested_name = format!("tabsnap-machine-{}", current.job_id);
+            let stored =
+                control.persist_capture_job(&machine_library, &current.job_id, &suggested_name)?;
+            println!("machine snapshot: {}", stored.path.display());
+            println!("machine snapshot bytes: {}", stored.size);
             println!(
-                "M30 results are held in memory only; M31 adds the machine snapshot container."
+                "machine snapshot contains {} browser target(s); encrypted payloads remain opaque to the companion",
+                stored.manifest.targets.len()
             );
             return Ok(());
         }
