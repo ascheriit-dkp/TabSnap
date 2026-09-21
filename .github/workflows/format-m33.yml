@@ -1,4 +1,5 @@
 name: Format M33
+# rerun after terminal-state UX fix
 
 on:
   push:
