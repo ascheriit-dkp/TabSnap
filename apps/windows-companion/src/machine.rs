@@ -1023,6 +1023,141 @@ mod tests {
     }
 
     #[test]
+    fn rejects_duplicate_instance_ids_in_hostile_manifest() {
+        let mut manifest = Vec::new();
+        manifest.extend_from_slice(&0_u64.to_be_bytes());
+        manifest.extend_from_slice(&decode_hex_128(JOB_ID).unwrap());
+        manifest.extend_from_slice(&2_u16.to_be_bytes());
+
+        for _ in 0..2 {
+            manifest.extend_from_slice(&decode_hex_128(CHROME_ID).unwrap());
+            manifest.push(browser_code(BrowserKind::Chrome));
+            manifest.push(0);
+            manifest.push(1);
+            manifest.extend_from_slice(&1_u32.to_be_bytes());
+        }
+
+        assert_eq!(
+            parse_manifest(&manifest, (PREFIX_BYTES + manifest.len()) as u64)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_browser_and_invalid_version_metadata() {
+        let mut unknown_browser = Vec::new();
+        unknown_browser.extend_from_slice(&0_u64.to_be_bytes());
+        unknown_browser.extend_from_slice(&decode_hex_128(JOB_ID).unwrap());
+        unknown_browser.extend_from_slice(&1_u16.to_be_bytes());
+        unknown_browser.extend_from_slice(&decode_hex_128(CHROME_ID).unwrap());
+        unknown_browser.push(99);
+        unknown_browser.push(0);
+        unknown_browser.push(1);
+        unknown_browser.extend_from_slice(&1_u32.to_be_bytes());
+        assert_eq!(
+            parse_manifest(
+                &unknown_browser,
+                (PREFIX_BYTES + unknown_browser.len()) as u64
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let mut invalid_version = Vec::new();
+        invalid_version.extend_from_slice(&0_u64.to_be_bytes());
+        invalid_version.extend_from_slice(&decode_hex_128(JOB_ID).unwrap());
+        invalid_version.extend_from_slice(&1_u16.to_be_bytes());
+        invalid_version.extend_from_slice(&decode_hex_128(CHROME_ID).unwrap());
+        invalid_version.push(browser_code(BrowserKind::Chrome));
+        invalid_version.push(1);
+        invalid_version.push(b'!');
+        invalid_version.push(1);
+        invalid_version.extend_from_slice(&1_u32.to_be_bytes());
+        assert_eq!(
+            parse_manifest(
+                &invalid_version,
+                (PREFIX_BYTES + invalid_version.len()) as u64
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_failure_code_and_invalid_payload_lengths() {
+        let mut bad_failure = Vec::new();
+        bad_failure.extend_from_slice(&0_u64.to_be_bytes());
+        bad_failure.extend_from_slice(&decode_hex_128(JOB_ID).unwrap());
+        bad_failure.extend_from_slice(&2_u16.to_be_bytes());
+
+        bad_failure.extend_from_slice(&decode_hex_128(CHROME_ID).unwrap());
+        bad_failure.push(browser_code(BrowserKind::Chrome));
+        bad_failure.push(0);
+        bad_failure.push(1);
+        bad_failure.extend_from_slice(&1_u32.to_be_bytes());
+
+        bad_failure.extend_from_slice(&decode_hex_128(FIREFOX_ID).unwrap());
+        bad_failure.push(browser_code(BrowserKind::Firefox));
+        bad_failure.push(0);
+        bad_failure.push(2);
+        bad_failure.push(99);
+
+        assert_eq!(
+            parse_manifest(&bad_failure, (PREFIX_BYTES + bad_failure.len()) as u64)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        for payload_len in [0_u32, (MAX_CAPTURE_RESULT_BYTES as u32) + 1] {
+            let mut manifest = Vec::new();
+            manifest.extend_from_slice(&0_u64.to_be_bytes());
+            manifest.extend_from_slice(&decode_hex_128(JOB_ID).unwrap());
+            manifest.extend_from_slice(&1_u16.to_be_bytes());
+            manifest.extend_from_slice(&decode_hex_128(CHROME_ID).unwrap());
+            manifest.push(browser_code(BrowserKind::Chrome));
+            manifest.push(0);
+            manifest.push(1);
+            manifest.extend_from_slice(&payload_len.to_be_bytes());
+            assert_eq!(
+                parse_manifest(&manifest, (PREFIX_BYTES + manifest.len()) as u64)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_target_count_before_target_allocation() {
+        let mut zero = Vec::new();
+        zero.extend_from_slice(&0_u64.to_be_bytes());
+        zero.extend_from_slice(&decode_hex_128(JOB_ID).unwrap());
+        zero.extend_from_slice(&0_u16.to_be_bytes());
+        assert_eq!(
+            parse_manifest(&zero, (PREFIX_BYTES + zero.len()) as u64)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let mut too_many = Vec::new();
+        too_many.extend_from_slice(&0_u64.to_be_bytes());
+        too_many.extend_from_slice(&decode_hex_128(JOB_ID).unwrap());
+        too_many.extend_from_slice(&((MAX_BROWSER_INSTANCES + 1) as u16).to_be_bytes());
+        assert_eq!(
+            parse_manifest(&too_many, (PREFIX_BYTES + too_many.len()) as u64)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
     fn rejects_oversize_sparse_machine_file_before_allocation() {
         let root = temp_root("oversize");
         fs::create_dir_all(&root).unwrap();
