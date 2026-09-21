@@ -1,4 +1,5 @@
 name: Validate M34 Hardening
+# rerun after rustfmt
 
 on:
   push:
