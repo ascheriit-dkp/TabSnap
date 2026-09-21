@@ -1,6 +1,6 @@
 {
   "name": "tabsnap",
-  "version": "0.3.0-alpha.5",
+  "version": "0.4.0-alpha.1",
   "private": true,
   "description": "Move a browser workspace between machines without a backend.",
   "license": "MIT",
