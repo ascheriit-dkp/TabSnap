@@ -712,7 +712,9 @@ mod tests {
         )
         .unwrap();
 
-        let first = jobs.status(JOB_ID, start + Duration::from_millis(1)).unwrap();
+        let first = jobs
+            .status(JOB_ID, start + Duration::from_millis(1))
+            .unwrap();
         let second = jobs
             .status(second_job, start + Duration::from_millis(1))
             .unwrap();
@@ -754,13 +756,14 @@ mod tests {
             Err(CaptureJobError::CapacityExceeded)
         );
 
-        assert!(jobs
-            .create(
+        assert!(
+            jobs.create(
                 "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_owned(),
                 vec![target],
                 start + Duration::from_secs(3),
             )
-            .is_ok());
+            .is_ok()
+        );
     }
 
     #[test]

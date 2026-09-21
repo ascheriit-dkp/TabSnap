@@ -802,12 +802,8 @@ mod tests {
             .next_assignment(CHROME_DEST, start + Duration::from_millis(1))
             .unwrap();
         assert_eq!(first.job_id, JOB_ID);
-        jobs.submit_success(
-            JOB_ID,
-            CHROME_DEST,
-            start + Duration::from_millis(1),
-        )
-        .unwrap();
+        jobs.submit_success(JOB_ID, CHROME_DEST, start + Duration::from_millis(1))
+            .unwrap();
 
         let second = jobs
             .next_assignment(CHROME_DEST, start + Duration::from_millis(1))
