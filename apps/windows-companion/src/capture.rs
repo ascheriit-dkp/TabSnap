@@ -665,6 +665,105 @@ mod tests {
     }
 
     #[test]
+    fn multiple_jobs_for_one_browser_are_isolated_and_dispatched_oldest_first() {
+        let start = Instant::now();
+        let second_job = "22222222222222222222222222222222";
+        let mut jobs = store();
+        let target = instance(
+            CHROME_ID,
+            BrowserKind::Chrome,
+            vec![BrowserCapability::Capture],
+        );
+
+        jobs.create(JOB_ID.to_owned(), vec![target.clone()], start)
+            .unwrap();
+        jobs.create(
+            second_job.to_owned(),
+            vec![target],
+            start + Duration::from_millis(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            jobs.next_assignment(CHROME_ID, start + Duration::from_millis(1))
+                .unwrap()
+                .job_id,
+            JOB_ID
+        );
+        jobs.submit_result(
+            JOB_ID,
+            CHROME_ID,
+            vec![1, 2, 3],
+            start + Duration::from_millis(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            jobs.next_assignment(CHROME_ID, start + Duration::from_millis(1))
+                .unwrap()
+                .job_id,
+            second_job
+        );
+        jobs.submit_failure(
+            second_job,
+            CHROME_ID,
+            CaptureFailure::CaptureFailed,
+            start + Duration::from_millis(1),
+        )
+        .unwrap();
+
+        let first = jobs.status(JOB_ID, start + Duration::from_millis(1)).unwrap();
+        let second = jobs
+            .status(second_job, start + Duration::from_millis(1))
+            .unwrap();
+        assert_eq!(first.completed_count(), 1);
+        assert_eq!(first.failed_count(), 0);
+        assert_eq!(second.completed_count(), 0);
+        assert_eq!(second.failed_count(), 1);
+    }
+
+    #[test]
+    fn job_capacity_recovers_after_retention_prunes_terminal_jobs() {
+        let start = Instant::now();
+        let target = instance(
+            CHROME_ID,
+            BrowserKind::Chrome,
+            vec![BrowserCapability::Capture],
+        );
+        let mut jobs = CaptureJobStore::new(
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(3),
+            16,
+            24,
+        );
+
+        for index in 0..MAX_CAPTURE_JOBS {
+            let job_id = format!("{index:032x}");
+            jobs.create(job_id.clone(), vec![target.clone()], start)
+                .unwrap();
+            jobs.submit_failure(&job_id, CHROME_ID, CaptureFailure::CaptureFailed, start)
+                .unwrap();
+        }
+        assert_eq!(
+            jobs.create(
+                "ffffffffffffffffffffffffffffffff".to_owned(),
+                vec![target.clone()],
+                start,
+            ),
+            Err(CaptureJobError::CapacityExceeded)
+        );
+
+        assert!(jobs
+            .create(
+                "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_owned(),
+                vec![target],
+                start + Duration::from_secs(3),
+            )
+            .is_ok());
+    }
+
+    #[test]
     fn enforces_result_and_job_byte_limits() {
         let start = Instant::now();
         let mut jobs = store();
