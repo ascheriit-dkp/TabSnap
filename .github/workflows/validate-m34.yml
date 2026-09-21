@@ -1,0 +1,27 @@
+name: Validate M34 Hardening
+
+on:
+  push:
+    branches:
+      - feat/level4-hardening
+    paths:
+      - .github/workflows/validate-m34.yml
+
+permissions:
+  contents: read
+
+jobs:
+  windows-hardening:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/level4-hardening
+      - name: Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add clippy rustfmt
+      - run: cargo fmt --manifest-path apps/windows-companion/Cargo.toml --check
+      - run: cargo clippy --manifest-path apps/windows-companion/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path apps/windows-companion/Cargo.toml --locked
