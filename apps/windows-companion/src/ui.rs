@@ -192,7 +192,9 @@ mod windows_ui {
 
     #[derive(Debug, Clone)]
     enum ActiveOperation {
-        Capture { job_id: String },
+        Capture {
+            job_id: String,
+        },
         Restore {
             job_id: String,
             running: bool,
@@ -326,7 +328,10 @@ mod windows_ui {
                     .targets
                     .iter()
                     .filter(|target| {
-                        matches!(target.state, crate::machine::MachineTargetState::Complete { .. })
+                        matches!(
+                            target.state,
+                            crate::machine::MachineTargetState::Complete { .. }
+                        )
                     })
                     .count();
                 format!(
@@ -498,7 +503,10 @@ mod windows_ui {
             (state.browser_control.clone(), state.browser_list)
         };
         let Some(control) = control else {
-            replace_list(list, &["Protocol stopped. No connected browsers.".to_owned()]);
+            replace_list(
+                list,
+                &["Protocol stopped. No connected browsers.".to_owned()],
+            );
             return Ok(());
         };
 
@@ -769,7 +777,10 @@ Loopback only. Pairing is explicit; no browser discovery or cloud access."
         replace_list(operation_list, &render_restore_status(&status));
         set_text(
             operation_status,
-            &format!("Restore {} started from {}.", status.job_id, selected.file_name),
+            &format!(
+                "Restore {} started from {}.",
+                status.job_id, selected.file_name
+            ),
         );
         let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
         state.active_operation = Some(ActiveOperation::Restore {
@@ -810,7 +821,10 @@ Loopback only. Pairing is explicit; no browser discovery or cloud access."
             )
         };
         let control = control.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotConnected, "Restore control is unavailable.")
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "Restore control is unavailable.",
+            )
         })?;
         let status = control.retry_restore_job(&job_id)?;
         replace_list(operation_list, &render_restore_status(&status));
@@ -847,7 +861,9 @@ Loopback only. Pairing is explicit; no browser discovery or cloud access."
         if completed == 0 {
             set_text(
                 operation_status,
-                &format!("Capture finished: 0 succeeded, {failed} failed. No machine snapshot written."),
+                &format!(
+                    "Capture finished: 0 succeeded, {failed} failed. No machine snapshot written."
+                ),
             );
         } else {
             let suggested_name = format!("tabsnap-machine-{}", status.job_id);
@@ -924,7 +940,14 @@ Loopback only. Pairing is explicit; no browser discovery or cloud access."
     fn tick() -> io::Result<()> {
         refresh_browsers()?;
 
-        let (operation, capture_control, restore_control, machine_library, operation_list, operation_status) = {
+        let (
+            operation,
+            capture_control,
+            restore_control,
+            machine_library,
+            operation_list,
+            operation_status,
+        ) = {
             let state = STATE.get().expect("UI state initialized").lock().unwrap();
             (
                 state.active_operation.clone(),
