@@ -775,19 +775,42 @@ Loopback only. Pairing is explicit; no browser discovery or cloud access."
         })?;
         let status = control.create_restore_job(&selected.file_name)?;
         replace_list(operation_list, &render_restore_status(&status));
-        set_text(
-            operation_status,
-            &format!(
-                "Restore {} started from {}.",
-                status.job_id, selected.file_name
-            ),
-        );
+        let terminal = status.is_terminal();
+        let retryable = terminal && restore_retryable(&status);
+        if terminal {
+            set_text(
+                operation_status,
+                &format!(
+                    "Restore attempt finished: {} succeeded, {} failed, {} skipped.{}",
+                    status.completed_count(),
+                    status.failed_count(),
+                    status.skipped_count(),
+                    if retryable {
+                        " Retry is available after connecting the needed browser or correcting its password."
+                    } else {
+                        ""
+                    }
+                ),
+            );
+        } else {
+            set_text(
+                operation_status,
+                &format!(
+                    "Restore {} started from {}.",
+                    status.job_id, selected.file_name
+                ),
+            );
+        }
         let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
-        state.active_operation = Some(ActiveOperation::Restore {
-            job_id: status.job_id,
-            running: !status.is_terminal(),
-            retryable: status.is_terminal() && restore_retryable(&status),
-        });
+        state.active_operation = if terminal && !retryable {
+            None
+        } else {
+            Some(ActiveOperation::Restore {
+                job_id: status.job_id,
+                running: !terminal,
+                retryable,
+            })
+        };
         Ok(())
     }
 
