@@ -1,5 +1,5 @@
 name: Validate M33
-# rerun after rustfmt
+# rerun after terminal-state UX fix
 
 on:
   push:
