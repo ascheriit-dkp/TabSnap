@@ -44,6 +44,20 @@ pub struct ProtocolServer {
 }
 
 #[derive(Debug, Clone)]
+pub struct BrowserControl {
+    registry: Arc<Mutex<BrowserRegistry>>,
+}
+
+impl BrowserControl {
+    pub fn active_browsers(&self) -> io::Result<Vec<crate::coordination::BrowserInstance>> {
+        self.registry
+            .lock()
+            .map_err(|_| io::Error::other("Browser registry is unavailable."))
+            .map(|mut registry| registry.active(Instant::now()))
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct CaptureControl {
     registry: Arc<Mutex<BrowserRegistry>>,
     capture_jobs: Arc<Mutex<CaptureJobStore>>,
@@ -196,6 +210,12 @@ impl ProtocolServer {
 
     pub fn session_token(&self) -> &str {
         &self.token
+    }
+
+    pub fn browser_control(&self) -> BrowserControl {
+        BrowserControl {
+            registry: Arc::clone(&self.registry),
+        }
     }
 
     pub fn capture_control(&self) -> CaptureControl {
