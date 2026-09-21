@@ -11,8 +11,11 @@ mod windows_ui {
     use std::sync::{Mutex, OnceLock};
     use std::thread;
 
+    use crate::capture::{CaptureJobStatus, CaptureTargetStateView};
     use crate::library::{SnapshotEntry, SnapshotLibrary};
-    use crate::protocol::ProtocolServer;
+    use crate::machine::{MachineSnapshotEntry, MachineSnapshotLibrary};
+    use crate::protocol::{BrowserControl, CaptureControl, ProtocolServer, RestoreControl};
+    use crate::restore::{RestoreJobStatus, RestoreSkip, RestoreTargetStateView};
     use tabsnap_companion::{
         PortableLayout, StorageMode, activate_storage, load_storage_mode, resolve_storage,
         validate_storage_dir,
@@ -44,6 +47,7 @@ mod windows_ui {
 
     const WM_DESTROY: Uint = 0x0002;
     const WM_COMMAND: Uint = 0x0111;
+    const WM_TIMER: Uint = 0x0113;
     const SW_SHOW: i32 = 5;
 
     const LB_ADDSTRING: Uint = 0x0180;
@@ -71,6 +75,14 @@ mod windows_ui {
     const ID_APPLY_STORAGE: usize = 1012;
     const ID_START_SERVER: usize = 1020;
     const ID_COPY_PAIRING: usize = 1021;
+    const ID_BROWSER_REFRESH: usize = 1030;
+    const ID_MACHINE_LIST: usize = 1040;
+    const ID_MACHINE_REFRESH: usize = 1041;
+    const ID_CAPTURE_MACHINE: usize = 1050;
+    const ID_RESTORE_MACHINE: usize = 1051;
+    const ID_RETRY_RESTORE: usize = 1052;
+    const UI_TIMER_ID: usize = 1;
+    const UI_TIMER_MS: Uint = 750;
 
     #[repr(C)]
     struct WndClassW {
@@ -159,6 +171,8 @@ mod windows_ui {
         fn SetClipboardData(format: Uint, memory: isize) -> isize;
         fn CloseClipboard() -> Bool;
         fn LoadCursorW(instance: Hinstance, cursor_name: *const u16) -> Hcursor;
+        fn SetTimer(hwnd: Hwnd, id: usize, milliseconds: Uint, callback: *const c_void) -> usize;
+        fn KillTimer(hwnd: Hwnd, id: usize) -> Bool;
     }
 
     #[link(name = "kernel32")]
@@ -176,16 +190,38 @@ mod windows_ui {
         fn GetSaveFileNameW(open_file_name: *mut OpenFileNameW) -> Bool;
     }
 
+    #[derive(Debug, Clone)]
+    enum ActiveOperation {
+        Capture {
+            job_id: String,
+        },
+        Restore {
+            job_id: String,
+            running: bool,
+            retryable: bool,
+        },
+    }
+
     struct UiState {
         layout: PortableLayout,
         library: SnapshotLibrary,
+        machine_library: MachineSnapshotLibrary,
         entries: Vec<SnapshotEntry>,
+        machine_entries: Vec<MachineSnapshotEntry>,
         list: Hwnd,
+        machine_list: Hwnd,
+        browser_list: Hwnd,
+        operation_list: Hwnd,
+        operation_status: Hwnd,
         storage_mode: Hwnd,
         custom_path: Hwnd,
         privacy_status: Hwnd,
         pairing_status: Hwnd,
         pairing_code: Option<String>,
+        browser_control: Option<BrowserControl>,
+        capture_control: Option<CaptureControl>,
+        restore_control: Option<RestoreControl>,
+        active_operation: Option<ActiveOperation>,
     }
 
     static STATE: OnceLock<Mutex<UiState>> = OnceLock::new();
@@ -238,6 +274,18 @@ mod windows_ui {
         }
     }
 
+    fn replace_list(hwnd: Hwnd, lines: &[String]) {
+        unsafe {
+            SendMessageW(hwnd, LB_RESETCONTENT, 0, 0);
+        }
+        for line in lines {
+            let line = wide(line);
+            unsafe {
+                SendMessageW(hwnd, LB_ADDSTRING, 0, line.as_ptr() as Lparam);
+            }
+        }
+    }
+
     fn get_text(hwnd: Hwnd) -> String {
         let length = unsafe { GetWindowTextLengthW(hwnd) };
         if length <= 0 {
@@ -259,15 +307,40 @@ mod windows_ui {
     fn refresh_library() -> io::Result<()> {
         let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
         state.entries = state.library.list()?;
-        unsafe {
-            SendMessageW(state.list, LB_RESETCONTENT, 0, 0);
-        }
-        for entry in &state.entries {
-            let line = wide(&format!("{}    {} bytes", entry.file_name, entry.size));
-            unsafe {
-                SendMessageW(state.list, LB_ADDSTRING, 0, line.as_ptr() as Lparam);
-            }
-        }
+        let lines = state
+            .entries
+            .iter()
+            .map(|entry| format!("{}    {} bytes", entry.file_name, entry.size))
+            .collect::<Vec<_>>();
+        replace_list(state.list, &lines);
+        Ok(())
+    }
+
+    fn refresh_machine_library() -> io::Result<()> {
+        let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
+        state.machine_entries = state.machine_library.list()?;
+        let lines = state
+            .machine_entries
+            .iter()
+            .map(|entry| {
+                let complete = entry
+                    .manifest
+                    .targets
+                    .iter()
+                    .filter(|target| {
+                        matches!(
+                            target.state,
+                            crate::machine::MachineTargetState::Complete { .. }
+                        )
+                    })
+                    .count();
+                format!(
+                    "{}    {} browsers    {} bytes",
+                    entry.file_name, complete, entry.size
+                )
+            })
+            .collect::<Vec<_>>();
+        replace_list(state.machine_list, &lines);
         Ok(())
     }
 
@@ -280,9 +353,18 @@ mod windows_ui {
         state.entries.get(index as usize).cloned()
     }
 
+    fn selected_machine_entry() -> Option<MachineSnapshotEntry> {
+        let state = STATE.get()?.lock().ok()?;
+        let index = unsafe { SendMessageW(state.machine_list, LB_GETCURSEL, 0, 0) };
+        if index == LB_ERR || index < 0 {
+            return None;
+        }
+        state.machine_entries.get(index as usize).cloned()
+    }
+
     fn choose_file(parent: Hwnd, save: bool) -> Option<PathBuf> {
         let mut buffer = vec![0_u16; 32_768];
-        let filter = wide("TabSnap snapshots (*.tabsnap)\0*.tabsnap\0All files (*.*)\0*.*\0");
+        let filter = wide("TabSnap snapshots (*.tabsnap) *.tabsnap All files (*.*) *.* ");
         let title = wide(if save {
             "Export encrypted snapshot"
         } else {
@@ -357,10 +439,22 @@ mod windows_ui {
     }
 
     fn apply_storage(parent: Hwnd) -> io::Result<()> {
-        let (layout, combo, custom) = {
+        let (layout, combo, custom, protocol_running) = {
             let state = STATE.get().expect("UI state initialized").lock().unwrap();
-            (state.layout.clone(), state.storage_mode, state.custom_path)
+            (
+                state.layout.clone(),
+                state.storage_mode,
+                state.custom_path,
+                state.pairing_code.is_some(),
+            )
         };
+        if protocol_running {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Stop and restart TabSnap before changing storage while the protocol is running.",
+            ));
+        }
+
         let selected = unsafe { SendMessageW(combo, CB_GETCURSEL, 0, 0) };
         let mode = match selected {
             0 => StorageMode::Portable,
@@ -386,6 +480,7 @@ mod windows_ui {
         let storage = activate_storage(&layout, mode)?;
         let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
         state.library = SnapshotLibrary::new(storage.snapshots_dir.clone());
+        state.machine_library = MachineSnapshotLibrary::new(storage.snapshots_dir.clone());
         set_text(
             state.privacy_status,
             &format!(
@@ -397,7 +492,50 @@ mod windows_ui {
         );
         drop(state);
         refresh_library()?;
+        refresh_machine_library()?;
         message(parent, "Storage updated and write-tested.", "TabSnap");
+        Ok(())
+    }
+
+    fn refresh_browsers() -> io::Result<()> {
+        let (control, list) = {
+            let state = STATE.get().expect("UI state initialized").lock().unwrap();
+            (state.browser_control.clone(), state.browser_list)
+        };
+        let Some(control) = control else {
+            replace_list(
+                list,
+                &["Protocol stopped. No connected browsers.".to_owned()],
+            );
+            return Ok(());
+        };
+
+        let browsers = control.active_browsers()?;
+        let lines = if browsers.is_empty() {
+            vec!["No paired browser pages are currently connected.".to_owned()]
+        } else {
+            browsers
+                .into_iter()
+                .map(|browser| {
+                    let version = browser.version.as_deref().unwrap_or("unknown");
+                    let capabilities = browser
+                        .capabilities
+                        .iter()
+                        .map(|capability| capability.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let short_id = browser.instance_id.get(..8).unwrap_or(&browser.instance_id);
+                    format!(
+                        "{} {}    [{}]    {}…",
+                        browser.browser.as_str(),
+                        version,
+                        capabilities,
+                        short_id
+                    )
+                })
+                .collect()
+        };
+        replace_list(list, &lines);
         Ok(())
     }
 
@@ -418,19 +556,30 @@ mod windows_ui {
         let server = ProtocolServer::bind(library)?;
         let endpoint = server.endpoint()?;
         let pairing = server.pairing_code()?;
+        let browser_control = server.browser_control();
+        let capture_control = server.capture_control();
+        let restore_control = server.restore_control();
+
         {
             let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
             state.pairing_code = Some(pairing.clone());
+            state.browser_control = Some(browser_control);
+            state.capture_control = Some(capture_control);
+            state.restore_control = Some(restore_control);
             set_text(
                 state.pairing_status,
                 &format!(
-                    "Listening: {endpoint}\r\nPairing code: {pairing}\r\nLoopback only. Token stays in memory. Close TabSnap to stop."
+                    "Listening: {endpoint}
+Pairing code: {pairing}
+Loopback only. Pairing is explicit; no browser discovery or cloud access."
                 ),
             );
         }
+
         thread::spawn(move || {
             let _ = server.serve_forever();
         });
+        refresh_browsers()?;
         Ok(())
     }
 
@@ -474,6 +623,392 @@ mod windows_ui {
         Ok(())
     }
 
+    fn operation_is_running(operation: &ActiveOperation) -> bool {
+        match operation {
+            ActiveOperation::Capture { .. } => true,
+            ActiveOperation::Restore { running, .. } => *running,
+        }
+    }
+
+    fn ensure_can_start_operation() -> io::Result<()> {
+        let state = STATE.get().expect("UI state initialized").lock().unwrap();
+        if state
+            .active_operation
+            .as_ref()
+            .is_some_and(operation_is_running)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "A whole-machine operation is already running.",
+            ));
+        }
+        Ok(())
+    }
+
+    fn render_capture_status(status: &CaptureJobStatus) -> Vec<String> {
+        status
+            .targets
+            .iter()
+            .map(|target| {
+                let version = target.instance.version.as_deref().unwrap_or("unknown");
+                let state = match target.state {
+                    CaptureTargetStateView::Pending => "pending".to_owned(),
+                    CaptureTargetStateView::Claimed => "capturing".to_owned(),
+                    CaptureTargetStateView::Complete { bytes } => {
+                        format!("complete ({bytes} encrypted bytes)")
+                    }
+                    CaptureTargetStateView::Failed { reason } => {
+                        format!("failed ({})", reason.as_str())
+                    }
+                };
+                format!(
+                    "{} {}    {}",
+                    target.instance.browser.as_str(),
+                    version,
+                    state
+                )
+            })
+            .collect()
+    }
+
+    fn render_restore_status(status: &RestoreJobStatus) -> Vec<String> {
+        status
+            .targets
+            .iter()
+            .map(|target| {
+                let source_version = target.source_version.as_deref().unwrap_or("unknown");
+                let destination = target
+                    .destination
+                    .as_ref()
+                    .map(|instance| {
+                        format!(
+                            "{} {}",
+                            instance.browser.as_str(),
+                            instance.version.as_deref().unwrap_or("unknown")
+                        )
+                    })
+                    .unwrap_or_else(|| "no destination".to_owned());
+                let state = match target.state {
+                    RestoreTargetStateView::Pending => "pending".to_owned(),
+                    RestoreTargetStateView::Claimed => "restoring".to_owned(),
+                    RestoreTargetStateView::Complete => "complete".to_owned(),
+                    RestoreTargetStateView::Failed { reason } => {
+                        format!("failed ({})", reason.as_str())
+                    }
+                    RestoreTargetStateView::Skipped { reason } => {
+                        format!("skipped ({})", reason.as_str())
+                    }
+                };
+                format!(
+                    "{} {} -> {}    {}",
+                    target.source_browser.as_str(),
+                    source_version,
+                    destination,
+                    state
+                )
+            })
+            .collect()
+    }
+
+    fn restore_retryable(status: &RestoreJobStatus) -> bool {
+        status.targets.iter().any(|target| {
+            matches!(
+                target.state,
+                RestoreTargetStateView::Failed { .. }
+                    | RestoreTargetStateView::Skipped {
+                        reason: RestoreSkip::BrowserUnavailable
+                    }
+            )
+        })
+    }
+
+    fn start_capture() -> io::Result<()> {
+        ensure_can_start_operation()?;
+        let (control, operation_list, operation_status) = {
+            let state = STATE.get().expect("UI state initialized").lock().unwrap();
+            (
+                state.capture_control.clone(),
+                state.operation_list,
+                state.operation_status,
+            )
+        };
+        let control = control.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "Start the companion protocol and pair browser pages first.",
+            )
+        })?;
+        let status = control.create_capture_job()?;
+        replace_list(operation_list, &render_capture_status(&status));
+        set_text(
+            operation_status,
+            &format!("Capture {} started.", status.job_id),
+        );
+        let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
+        state.active_operation = Some(ActiveOperation::Capture {
+            job_id: status.job_id,
+        });
+        Ok(())
+    }
+
+    fn start_restore() -> io::Result<()> {
+        ensure_can_start_operation()?;
+        let selected = selected_machine_entry().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Select a machine snapshot first.",
+            )
+        })?;
+        let (control, operation_list, operation_status) = {
+            let state = STATE.get().expect("UI state initialized").lock().unwrap();
+            (
+                state.restore_control.clone(),
+                state.operation_list,
+                state.operation_status,
+            )
+        };
+        let control = control.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "Start the companion protocol and pair browser pages first.",
+            )
+        })?;
+        let status = control.create_restore_job(&selected.file_name)?;
+        replace_list(operation_list, &render_restore_status(&status));
+        let terminal = status.is_terminal();
+        let retryable = terminal && restore_retryable(&status);
+        if terminal {
+            set_text(
+                operation_status,
+                &format!(
+                    "Restore attempt finished: {} succeeded, {} failed, {} skipped.{}",
+                    status.completed_count(),
+                    status.failed_count(),
+                    status.skipped_count(),
+                    if retryable {
+                        " Retry is available after connecting the needed browser or correcting its password."
+                    } else {
+                        ""
+                    }
+                ),
+            );
+        } else {
+            set_text(
+                operation_status,
+                &format!(
+                    "Restore {} started from {}.",
+                    status.job_id, selected.file_name
+                ),
+            );
+        }
+        let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
+        state.active_operation = if terminal && !retryable {
+            None
+        } else {
+            Some(ActiveOperation::Restore {
+                job_id: status.job_id,
+                running: !terminal,
+                retryable,
+            })
+        };
+        Ok(())
+    }
+
+    fn retry_restore() -> io::Result<()> {
+        let (control, job_id, operation_list, operation_status) = {
+            let state = STATE.get().expect("UI state initialized").lock().unwrap();
+            let (job_id, running, retryable) = match state.active_operation.as_ref() {
+                Some(ActiveOperation::Restore {
+                    job_id,
+                    running,
+                    retryable,
+                }) => (job_id.clone(), *running, *retryable),
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "No restore job is available for retry.",
+                    ));
+                }
+            };
+            if running || !retryable {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "The current restore is not ready for retry.",
+                ));
+            }
+            (
+                state.restore_control.clone(),
+                job_id,
+                state.operation_list,
+                state.operation_status,
+            )
+        };
+        let control = control.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "Restore control is unavailable.",
+            )
+        })?;
+        let status = control.retry_restore_job(&job_id)?;
+        replace_list(operation_list, &render_restore_status(&status));
+        set_text(operation_status, &format!("Retrying restore {job_id}."));
+        let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
+        state.active_operation = Some(ActiveOperation::Restore {
+            job_id,
+            running: !status.is_terminal(),
+            retryable: status.is_terminal() && restore_retryable(&status),
+        });
+        Ok(())
+    }
+
+    fn poll_capture(
+        job_id: &str,
+        control: CaptureControl,
+        machine_library: MachineSnapshotLibrary,
+        operation_list: Hwnd,
+        operation_status: Hwnd,
+    ) -> io::Result<()> {
+        let Some(status) = control.capture_job_status(job_id)? else {
+            set_text(operation_status, "Capture job expired before completion.");
+            let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
+            state.active_operation = None;
+            return Ok(());
+        };
+        replace_list(operation_list, &render_capture_status(&status));
+        if !status.is_terminal() {
+            return Ok(());
+        }
+
+        let completed = status.completed_count();
+        let failed = status.failed_count();
+        if completed == 0 {
+            set_text(
+                operation_status,
+                &format!(
+                    "Capture finished: 0 succeeded, {failed} failed. No machine snapshot written."
+                ),
+            );
+        } else {
+            let suggested_name = format!("tabsnap-machine-{}", status.job_id);
+            match control.persist_capture_job(&machine_library, &status.job_id, &suggested_name) {
+                Ok(entry) => {
+                    set_text(
+                        operation_status,
+                        &format!(
+                            "Capture finished: {completed} succeeded, {failed} failed. Stored {}.",
+                            entry.file_name
+                        ),
+                    );
+                    refresh_machine_library()?;
+                }
+                Err(error) => {
+                    set_text(
+                        operation_status,
+                        &format!("Capture finished but storage failed: {error}"),
+                    );
+                }
+            }
+        }
+
+        let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
+        state.active_operation = None;
+        Ok(())
+    }
+
+    fn poll_restore(
+        job_id: &str,
+        control: RestoreControl,
+        operation_list: Hwnd,
+        operation_status: Hwnd,
+    ) -> io::Result<()> {
+        let Some(status) = control.restore_job_status(job_id)? else {
+            set_text(operation_status, "Restore job expired before completion.");
+            let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
+            state.active_operation = None;
+            return Ok(());
+        };
+        replace_list(operation_list, &render_restore_status(&status));
+        if !status.is_terminal() {
+            return Ok(());
+        }
+
+        let retryable = restore_retryable(&status);
+        set_text(
+            operation_status,
+            &format!(
+                "Restore attempt finished: {} succeeded, {} failed, {} skipped.{}",
+                status.completed_count(),
+                status.failed_count(),
+                status.skipped_count(),
+                if retryable {
+                    " Retry is available after connecting the needed browser or correcting its password."
+                } else {
+                    ""
+                }
+            ),
+        );
+        let mut state = STATE.get().expect("UI state initialized").lock().unwrap();
+        state.active_operation = if retryable {
+            Some(ActiveOperation::Restore {
+                job_id: job_id.to_owned(),
+                running: false,
+                retryable: true,
+            })
+        } else {
+            None
+        };
+        Ok(())
+    }
+
+    fn tick() -> io::Result<()> {
+        refresh_browsers()?;
+
+        let (
+            operation,
+            capture_control,
+            restore_control,
+            machine_library,
+            operation_list,
+            operation_status,
+        ) = {
+            let state = STATE.get().expect("UI state initialized").lock().unwrap();
+            (
+                state.active_operation.clone(),
+                state.capture_control.clone(),
+                state.restore_control.clone(),
+                state.machine_library.clone(),
+                state.operation_list,
+                state.operation_status,
+            )
+        };
+
+        match operation {
+            Some(ActiveOperation::Capture { job_id }) => {
+                if let Some(control) = capture_control {
+                    poll_capture(
+                        &job_id,
+                        control,
+                        machine_library,
+                        operation_list,
+                        operation_status,
+                    )?;
+                }
+            }
+            Some(ActiveOperation::Restore {
+                job_id,
+                running: true,
+                ..
+            }) => {
+                if let Some(control) = restore_control {
+                    poll_restore(&job_id, control, operation_list, operation_status)?;
+                }
+            }
+            Some(ActiveOperation::Restore { running: false, .. }) | None => {}
+        }
+
+        Ok(())
+    }
+
     unsafe extern "system" fn window_proc(
         hwnd: Hwnd,
         message_id: Uint,
@@ -508,6 +1043,11 @@ mod windows_ui {
                             })
                             .and_then(|value| copy_clipboard(hwnd, &value))
                     }
+                    ID_BROWSER_REFRESH => refresh_browsers(),
+                    ID_MACHINE_REFRESH => refresh_machine_library(),
+                    ID_CAPTURE_MACHINE => start_capture(),
+                    ID_RESTORE_MACHINE => start_restore(),
+                    ID_RETRY_RESTORE => retry_restore(),
                     _ => Ok(()),
                 };
                 if let Err(error) = result {
@@ -515,8 +1055,22 @@ mod windows_ui {
                 }
                 0
             }
+            WM_TIMER if w_param == UI_TIMER_ID => {
+                if let Err(error) = tick() {
+                    if let Some(state) = STATE.get().and_then(|state| state.lock().ok()) {
+                        set_text(
+                            state.operation_status,
+                            &format!("Whole-machine status update failed: {error}"),
+                        );
+                    }
+                }
+                0
+            }
             WM_DESTROY => {
-                unsafe { PostQuitMessage(0) };
+                unsafe {
+                    KillTimer(hwnd, UI_TIMER_ID);
+                    PostQuitMessage(0);
+                }
                 0
             }
             _ => unsafe { DefWindowProcW(hwnd, message_id, w_param, l_param) },
@@ -557,8 +1111,8 @@ mod windows_ui {
                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                820,
-                620,
+                1040,
+                900,
                 0,
                 0,
                 instance,
@@ -572,7 +1126,7 @@ mod windows_ui {
         child(
             hwnd,
             "STATIC",
-            "Encrypted snapshot library",
+            "Encrypted browser snapshots",
             0,
             20,
             18,
@@ -587,18 +1141,18 @@ mod windows_ui {
             WS_BORDER | WS_VSCROLL | LBS_NOTIFY | WS_TABSTOP,
             20,
             45,
-            760,
-            235,
+            480,
+            170,
             ID_LIST,
         )?;
         child(
-            hwnd, "BUTTON", "Refresh", WS_TABSTOP, 20, 292, 90, 30, ID_REFRESH,
+            hwnd, "BUTTON", "Refresh", WS_TABSTOP, 20, 225, 90, 28, ID_REFRESH,
         )?;
         child(
-            hwnd, "BUTTON", "Import", WS_TABSTOP, 120, 292, 90, 30, ID_IMPORT,
+            hwnd, "BUTTON", "Import", WS_TABSTOP, 120, 225, 90, 28, ID_IMPORT,
         )?;
         child(
-            hwnd, "BUTTON", "Export", WS_TABSTOP, 220, 292, 90, 30, ID_EXPORT,
+            hwnd, "BUTTON", "Export", WS_TABSTOP, 220, 225, 90, 28, ID_EXPORT,
         )?;
         child(
             hwnd,
@@ -606,20 +1160,54 @@ mod windows_ui {
             "Copy path",
             WS_TABSTOP,
             320,
-            292,
+            225,
             100,
-            30,
+            28,
             ID_COPY_PATH,
         )?;
 
-        child(hwnd, "STATIC", "Storage", 0, 20, 340, 100, 22, 0)?;
+        child(
+            hwnd,
+            "STATIC",
+            "Whole-machine snapshots",
+            0,
+            520,
+            18,
+            300,
+            22,
+            0,
+        )?;
+        let machine_list = child(
+            hwnd,
+            "LISTBOX",
+            "",
+            WS_BORDER | WS_VSCROLL | LBS_NOTIFY | WS_TABSTOP,
+            520,
+            45,
+            480,
+            170,
+            ID_MACHINE_LIST,
+        )?;
+        child(
+            hwnd,
+            "BUTTON",
+            "Refresh",
+            WS_TABSTOP,
+            520,
+            225,
+            90,
+            28,
+            ID_MACHINE_REFRESH,
+        )?;
+
+        child(hwnd, "STATIC", "Storage", 0, 20, 270, 100, 22, 0)?;
         let storage_mode = child(
             hwnd,
             "COMBOBOX",
             "",
             CBS_DROPDOWNLIST | WS_TABSTOP,
             20,
-            365,
+            295,
             150,
             120,
             ID_STORAGE_MODE,
@@ -648,8 +1236,8 @@ mod windows_ui {
             &custom_value,
             WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP,
             185,
-            365,
-            475,
+            295,
+            695,
             28,
             ID_CUSTOM_PATH,
         )?;
@@ -658,8 +1246,8 @@ mod windows_ui {
             "BUTTON",
             "Apply",
             WS_TABSTOP,
-            675,
-            365,
+            895,
+            295,
             105,
             28,
             ID_APPLY_STORAGE,
@@ -675,20 +1263,20 @@ mod windows_ui {
             ),
             0,
             20,
-            404,
-            760,
-            42,
+            330,
+            980,
+            36,
             0,
         )?;
 
-        child(hwnd, "STATIC", "Local bridge", 0, 20, 460, 100, 22, 0)?;
+        child(hwnd, "STATIC", "Local bridge", 0, 20, 375, 100, 22, 0)?;
         child(
             hwnd,
             "BUTTON",
             "Start protocol",
             WS_TABSTOP,
             20,
-            486,
+            400,
             125,
             30,
             ID_START_SERVER,
@@ -699,38 +1287,147 @@ mod windows_ui {
             "Copy pairing code",
             WS_TABSTOP,
             155,
-            486,
+            400,
             145,
             30,
             ID_COPY_PAIRING,
         )?;
+        child(
+            hwnd,
+            "BUTTON",
+            "Refresh browsers",
+            WS_TABSTOP,
+            310,
+            400,
+            135,
+            30,
+            ID_BROWSER_REFRESH,
+        )?;
         let pairing_status = child(
             hwnd,
             "STATIC",
-            "Stopped. No listener. No network connection.\r\nPasswords and decrypted browser data never enter this companion.",
+            "Stopped. No listener. No browser discovery or network connection.
+Passwords and decrypted browser data never enter this companion.",
             0,
-            320,
-            480,
-            460,
-            70,
+            465,
+            385,
+            535,
+            58,
+            0,
+        )?;
+        let browser_list = child(
+            hwnd,
+            "LISTBOX",
+            "",
+            WS_BORDER | WS_VSCROLL,
+            20,
+            445,
+            980,
+            105,
             0,
         )?;
 
+        child(
+            hwnd,
+            "STATIC",
+            "Whole-machine operation",
+            0,
+            20,
+            565,
+            200,
+            22,
+            0,
+        )?;
+        child(
+            hwnd,
+            "BUTTON",
+            "Capture machine",
+            WS_TABSTOP,
+            220,
+            560,
+            130,
+            30,
+            ID_CAPTURE_MACHINE,
+        )?;
+        child(
+            hwnd,
+            "BUTTON",
+            "Restore selected",
+            WS_TABSTOP,
+            360,
+            560,
+            130,
+            30,
+            ID_RESTORE_MACHINE,
+        )?;
+        child(
+            hwnd,
+            "BUTTON",
+            "Retry restore",
+            WS_TABSTOP,
+            500,
+            560,
+            120,
+            30,
+            ID_RETRY_RESTORE,
+        )?;
+        let operation_status = child(
+            hwnd,
+            "STATIC",
+            "Idle. Start the protocol and pair the browser pages you want to include.",
+            0,
+            20,
+            600,
+            980,
+            42,
+            0,
+        )?;
+        let operation_list = child(
+            hwnd,
+            "LISTBOX",
+            "",
+            WS_BORDER | WS_VSCROLL,
+            20,
+            645,
+            980,
+            180,
+            0,
+        )?;
+
+        let storage_root = storage.snapshots_dir.clone();
         STATE
             .set(Mutex::new(UiState {
                 layout,
-                library: SnapshotLibrary::new(storage.snapshots_dir),
+                library: SnapshotLibrary::new(storage_root.clone()),
+                machine_library: MachineSnapshotLibrary::new(storage_root),
                 entries: Vec::new(),
+                machine_entries: Vec::new(),
                 list,
+                machine_list,
+                browser_list,
+                operation_list,
+                operation_status,
                 storage_mode,
                 custom_path,
                 privacy_status,
                 pairing_status,
                 pairing_code: None,
+                browser_control: None,
+                capture_control: None,
+                restore_control: None,
+                active_operation: None,
             }))
             .map_err(|_| io::Error::other("UI state was already initialized."))?;
 
         refresh_library()?;
+        refresh_machine_library()?;
+        refresh_browsers()?;
+
+        let timer = unsafe { SetTimer(hwnd, UI_TIMER_ID, UI_TIMER_MS, null()) };
+        if timer == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
         unsafe {
             ShowWindow(hwnd, SW_SHOW);
             UpdateWindow(hwnd);

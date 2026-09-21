@@ -122,6 +122,43 @@ impl MachineSnapshotLibrary {
         inspect_machine_path(destination)
     }
 
+    pub fn list(&self) -> io::Result<Vec<MachineSnapshotEntry>> {
+        if !self.root.exists() {
+            return Ok(Vec::new());
+        }
+        if !self.root.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Machine snapshot library is not a directory: {}",
+                    self.root.display()
+                ),
+            ));
+        }
+
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if !metadata.file_type().is_file() || metadata.len() > MAX_MACHINE_FILE_BYTES {
+                continue;
+            }
+            if !has_machine_extension(&entry.path()) {
+                continue;
+            }
+            if let Ok(snapshot) = inspect_machine_path(entry.path()) {
+                entries.push(snapshot);
+            }
+        }
+        entries.sort_by(|left, right| {
+            left.file_name
+                .to_ascii_lowercase()
+                .cmp(&right.file_name.to_ascii_lowercase())
+                .then_with(|| left.file_name.cmp(&right.file_name))
+        });
+        Ok(entries)
+    }
+
     pub fn inspect(&self, file_name: &str) -> io::Result<MachineSnapshotEntry> {
         validate_library_file_name(file_name)?;
         inspect_machine_path(self.root.join(file_name))
@@ -820,6 +857,38 @@ mod tests {
             vec![1, 2, 3, 4, 255]
         );
         assert_no_temp_files(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lists_only_valid_machine_snapshots_in_deterministic_order() {
+        let start = Instant::now();
+        let mut jobs = capture_store();
+        jobs.create(
+            JOB_ID.to_owned(),
+            vec![browser(CHROME_ID, BrowserKind::Chrome, None)],
+            start,
+        )
+        .unwrap();
+        jobs.submit_result(JOB_ID, CHROME_ID, vec![7, 8], start)
+            .unwrap();
+        let export = jobs.terminal_export(JOB_ID, start).unwrap();
+        let root = temp_root("list");
+        let library = MachineSnapshotLibrary::new(&root);
+
+        let zeta = library.write_capture_job("zeta", &export).unwrap();
+        let alpha = library.write_capture_job("Alpha", &export).unwrap();
+        fs::write(root.join("broken.tabsnap-machine"), b"broken").unwrap();
+        fs::write(root.join("notes.txt"), b"ignore").unwrap();
+
+        let names = library
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.file_name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec![alpha.file_name, zeta.file_name]);
+
         fs::remove_dir_all(root).unwrap();
     }
 
