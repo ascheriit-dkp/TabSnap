@@ -39,9 +39,7 @@ const archiveNames = [
   'tabsnap-firefox-' + tag + '.zip',
   'tabsnap-companion-windows-x64-' + tag + '.zip',
 ];
-const expectedNames = archiveNames
-  .flatMap((name) => [name, name + '.sha256'])
-  .sort();
+const expectedNames = archiveNames.flatMap((name) => [name, name + '.sha256']).sort();
 
 const entries = await readdir(directory, { withFileTypes: true });
 const actualNames = entries.map((entry) => entry.name).sort();
@@ -73,14 +71,7 @@ for (const archiveName of archiveNames) {
 
   const actual = await sha256(archivePath);
   if (actual !== match[1]) {
-    fail(
-      'SHA-256 mismatch for ' +
-        archiveName +
-        ': expected ' +
-        match[1] +
-        ', got ' +
-        actual,
-    );
+    fail('SHA-256 mismatch for ' + archiveName + ': expected ' + match[1] + ', got ' + actual);
   }
 }
 
