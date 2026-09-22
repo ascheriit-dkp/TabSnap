@@ -63,7 +63,7 @@ for (const archiveName of archiveNames) {
   if (archiveStat.size === 0) fail('archive is empty: ' + archiveName);
 
   const checksumText = (await readFile(checksumPath, 'ascii')).trim();
-  const match = /^([0-9a-f]{64})  ([^\r\n]+)$/u.exec(checksumText);
+  const match = /^([0-9a-f]{64}) {2}([^\r\n]+)$/u.exec(checksumText);
   if (!match) fail('invalid checksum format: ' + archiveName + '.sha256');
   if (match[2] !== archiveName) {
     fail('checksum names ' + match[2] + ' instead of ' + archiveName);
