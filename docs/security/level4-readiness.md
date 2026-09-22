@@ -68,13 +68,19 @@ The release workflow produces eight assets:
 - Firefox ZIP and SHA-256;
 - portable Windows x64 companion ZIP and SHA-256.
 
+A separate post-release verification workflow downloads the published assets again from GitHub, requires exactly those eight files, recomputes all four SHA-256 hashes, inspects the extracted extension manifests/files and smoke-tests the packaged Windows companion from its downloaded ZIP.
+
 The release remains marked as a GitHub prerelease.
 
 ## 1.0 decision
 
 **Do not tag `1.0.0` yet.**
 
-Automated coverage is strong, but stable 1.0 still requires manual validation that cannot be honestly inferred from CI alone:
+Automated coverage is strong, including verification of the artifacts after publication, but stable 1.0 still requires manual validation that cannot be honestly inferred from CI alone.
+
+Use [the reproducible manual release QA checklist](./manual-release-qa.md). On Windows, `scripts/prepare-manual-release-qa.ps1` downloads and verifies the published assets, extracts the four packages and prepares a local checklist.
+
+The required manual matrix is:
 
 1. install the release candidate manually in current stable Chrome, Edge and Firefox;
 2. pair all three browsers with the packaged Windows companion at the same time;

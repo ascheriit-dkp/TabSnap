@@ -1,0 +1,82 @@
+name: Verify Published Release
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - '.github/workflows/release-verify.yml'
+      - 'scripts/verify-release-assets.mjs'
+      - 'scripts/verify-release-extension-package.mjs'
+      - 'scripts/test-packaged-windows-companion.ps1'
+      - 'package.json'
+      - 'apps/chrome-extension/public/manifest.json'
+      - 'apps/chrome-extension/firefox-manifest.json'
+
+permissions:
+  contents: read
+
+jobs:
+  published-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Resolve release tag
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="v$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('package.json','utf8')).version)")"
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+      - name: Download published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir release-assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets
+      - run: node scripts/verify-release-assets.mjs "$TAG" release-assets
+      - name: Extract browser packages
+        run: |
+          mkdir -p release-expanded/chrome release-expanded/edge release-expanded/firefox
+          unzip -q "release-assets/tabsnap-chrome-$TAG.zip" -d release-expanded/chrome
+          unzip -q "release-assets/tabsnap-edge-$TAG.zip" -d release-expanded/edge
+          unzip -q "release-assets/tabsnap-firefox-$TAG.zip" -d release-expanded/firefox
+      - run: node scripts/verify-release-extension-package.mjs "$TAG" chrome release-expanded/chrome
+      - run: node scripts/verify-release-extension-package.mjs "$TAG" edge release-expanded/edge
+      - run: node scripts/verify-release-extension-package.mjs "$TAG" firefox release-expanded/firefox
+
+  published-windows-companion:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+      - name: Resolve release tag
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'release') {
+            $tag = '${{ github.event.release.tag_name }}'
+          } else {
+            $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            $tag = "v$version"
+          }
+          "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Download published companion assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --dir release-assets --pattern "tabsnap-companion-windows-x64-$env:TAG.zip*"
+      - name: Verify packaged companion
+        shell: pwsh
+        run: |
+          $archive = Join-Path $PWD "release-assets\tabsnap-companion-windows-x64-$env:TAG.zip"
+          $checksum = "$archive.sha256"
+          ./scripts/test-packaged-windows-companion.ps1 -Archive $archive -Checksum $checksum

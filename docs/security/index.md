@@ -22,4 +22,4 @@ A `.tabsnap-machine` manifest contains bounded routing metadata around already-e
 
 Losing the snapshot password means losing access to the encrypted browser payload. There is no recovery service.
 
-Read the [threat model](./threat-model), [Level 4 / 1.0 readiness review](./level4-readiness) and [extension security audit](./extension-audit).
+Read the [threat model](./threat-model), [Level 4 / 1.0 readiness review](./level4-readiness), [manual release QA](./manual-release-qa) and [extension security audit](./extension-audit).

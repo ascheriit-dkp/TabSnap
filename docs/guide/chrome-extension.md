@@ -1,6 +1,6 @@
 # Chrome extension
 
-The Level 1 client is a Manifest V3 Chrome extension.
+The Chrome client is a Manifest V3 extension sharing the same TabSnap snapshot format and companion protocol as Microsoft Edge and Firefox.
 
 ## Install a prerelease
 
@@ -34,7 +34,7 @@ The extension requests only:
 - `tabs` — read tab URLs and titles for capture
 - `tabGroups` — read and restore group metadata
 
-There are no host permissions and no network permissions.
+There are no required host permissions. Access to `http://127.0.0.1/*` is optional and requested only when you explicitly connect the portable Windows companion.
 
 The extension CSP allows packaged WebAssembly because Argon2id is implemented locally with WASM. Remote scripts are not allowed.
 

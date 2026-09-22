@@ -35,13 +35,13 @@ There are no required host permissions and no content scripts.
 
 The normal extension workflow performs no remote network requests. TabSnap does not load remote JavaScript, WASM, fonts or other executable code.
 
-Optional companion communication is restricted to IPv4 loopback and uses an authenticated session token. The companion is a separate open-source Windows executable in the same repository.
+Optional companion communication is restricted to IPv4 loopback and uses an authenticated session token. Browser participation is explicit; the companion does not scan browser processes or profiles. The companion is a separate open-source Windows executable in the same repository.
 
 ## Data handling
 
 Extension-only mode processes captured browser state locally. Passwords remain inside the extension.
 
-The optional companion receives only encrypted `.tabsnap` bytes. It does not receive the password and cannot decrypt the stored snapshot.
+The optional companion receives encrypted `.tabsnap` payloads plus bounded browser-coordination metadata. Whole-machine `.tabsnap-machine` files contain those already-encrypted browser payloads and bounded routing metadata. The companion does not receive snapshot passwords, encryption keys or decrypted browser workspace contents.
 
 Firefox declares no required data collection and declares `browsingActivity` as optional for companion mode. Firefox requests this optional data permission only when the user presses Connect. Declining it leaves companion mode disabled while extension-only features remain available.
 
