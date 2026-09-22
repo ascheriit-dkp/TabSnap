@@ -24,7 +24,7 @@ Chrome, Microsoft Edge and Firefox use the same open snapshot format. Same-brows
 
 No account. No TabSnap backend. No analytics. No telemetry.
 
-An optional portable Windows companion can keep encrypted snapshots on the local computer or removable storage. Companion mode is opt-in, uses authenticated IPv4 loopback only, and never receives the snapshot password.
+An optional portable Windows companion can keep encrypted snapshots on the local computer or removable storage and coordinate whole-machine capture/restore across explicitly paired Chrome, Edge and Firefox pages. Companion mode is opt-in, uses authenticated IPv4 loopback only, and never receives the snapshot password or decrypted workspace state.
 
 ## Main features
 
@@ -36,7 +36,7 @@ An optional portable Windows companion can keep encrypted snapshots on the local
 - local import and non-destructive restore
 - Chrome, Microsoft Edge and Firefox support
 - cross-browser compatibility preview
-- optional portable Windows companion
+- optional portable Windows companion with whole-machine multi-browser capture/restore
 - no account, backend, analytics or telemetry
 
 ## Privacy policy
