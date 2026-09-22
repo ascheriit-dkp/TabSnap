@@ -45,6 +45,7 @@ export default defineConfig({
           { text: 'Privacy', link: '/privacy' },
           { text: 'Security', link: '/security/' },
           { text: '1.0 readiness', link: '/security/level4-readiness' },
+          { text: 'Manual release QA', link: '/security/manual-release-qa' },
           { text: 'Architecture', link: '/architecture/' },
           { text: 'Roadmap', link: '/roadmap' },
         ],
