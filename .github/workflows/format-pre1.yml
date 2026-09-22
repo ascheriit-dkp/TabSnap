@@ -1,0 +1,35 @@
+name: Format Pre-1.0 QA
+
+on:
+  push:
+    branches:
+      - qa/pre-1.0-release-verification
+    paths:
+      - .github/workflows/format-pre1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: qa/pre-1.0-release-verification
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm prettier --write scripts/verify-release-assets.mjs scripts/verify-release-extension-package.mjs docs/security/manual-release-qa.md docs/security/level4-readiness.md docs/guide/chrome-extension.md docs/guide/store-submission.md store/listing.md store/reviewer-notes.md docs/security/index.md docs/.vitepress/config.mts
+      - name: Commit formatting
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/verify-release-assets.mjs scripts/verify-release-extension-package.mjs docs/security/manual-release-qa.md docs/security/level4-readiness.md docs/guide/chrome-extension.md docs/guide/store-submission.md store/listing.md store/reviewer-notes.md docs/security/index.md docs/.vitepress/config.mts
+          git diff --cached --quiet || git commit -m "style: format pre-1.0 QA"
+          git push origin HEAD:qa/pre-1.0-release-verification
