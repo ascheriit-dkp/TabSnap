@@ -20,7 +20,7 @@ Export it as an encrypted string or `.tabsnap` file, move it using any channel y
 
 No TabSnap account. No TabSnap backend. No analytics. No telemetry.
 
-An optional portable Windows companion can keep encrypted snapshots on the local computer or removable storage. Companion mode is opt-in and uses authenticated IPv4 loopback only.
+An optional portable Windows companion can keep encrypted snapshots on the local computer or removable storage and coordinate whole-machine capture/restore across explicitly paired Chrome, Edge and Firefox pages. Companion mode is opt-in and uses authenticated IPv4 loopback only.
 
 ## Permission justifications
 
