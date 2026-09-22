@@ -179,4 +179,6 @@ Whole-machine multi-browser capture and restore.
 - threat-model and privacy documentation update
 - portable release packaging and 1.0 readiness review
 
-`1.0.0` waits until Level 4 is stable.
+Level 4 implementation is complete in the `v0.4.0-alpha.1` prerelease candidate.
+
+`1.0.0` waits for the manual multi-browser, packaged-companion, removable-storage and store/signing matrix in [`docs/security/level4-readiness.md`](./docs/security/level4-readiness.md).

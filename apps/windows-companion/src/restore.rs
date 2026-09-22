@@ -776,6 +776,84 @@ mod tests {
     }
 
     #[test]
+    fn multiple_restore_jobs_for_one_destination_are_isolated_and_ordered() {
+        let start = Instant::now();
+        let second_job = "22222222222222222222222222222222";
+        let snapshot = machine(vec![complete_source(CHROME_SOURCE, BrowserKind::Chrome)]);
+        let mut jobs = store();
+        let destination = browser(CHROME_DEST, BrowserKind::Chrome);
+
+        jobs.create(
+            JOB_ID.to_owned(),
+            &snapshot,
+            vec![destination.clone()],
+            start,
+        )
+        .unwrap();
+        jobs.create(
+            second_job.to_owned(),
+            &snapshot,
+            vec![destination],
+            start + Duration::from_millis(1),
+        )
+        .unwrap();
+
+        let first = jobs
+            .next_assignment(CHROME_DEST, start + Duration::from_millis(1))
+            .unwrap();
+        assert_eq!(first.job_id, JOB_ID);
+        jobs.submit_success(JOB_ID, CHROME_DEST, start + Duration::from_millis(1))
+            .unwrap();
+
+        let second = jobs
+            .next_assignment(CHROME_DEST, start + Duration::from_millis(1))
+            .unwrap();
+        assert_eq!(second.job_id, second_job);
+        jobs.submit_failure(
+            second_job,
+            CHROME_DEST,
+            RestoreFailure::RestoreFailed,
+            start + Duration::from_millis(1),
+        )
+        .unwrap();
+
+        let first_status = jobs
+            .status(JOB_ID, start + Duration::from_millis(1))
+            .unwrap();
+        let second_status = jobs
+            .status(second_job, start + Duration::from_millis(1))
+            .unwrap();
+        assert_eq!(first_status.completed_count(), 1);
+        assert_eq!(first_status.failed_count(), 0);
+        assert_eq!(second_status.completed_count(), 0);
+        assert_eq!(second_status.failed_count(), 1);
+    }
+
+    #[test]
+    fn unrelated_destination_cannot_finish_another_targets_restore() {
+        let start = Instant::now();
+        let snapshot = machine(vec![complete_source(CHROME_SOURCE, BrowserKind::Chrome)]);
+        let mut jobs = store();
+        jobs.create(
+            JOB_ID.to_owned(),
+            &snapshot,
+            vec![browser(CHROME_DEST, BrowserKind::Chrome)],
+            start,
+        )
+        .unwrap();
+
+        assert_eq!(
+            jobs.submit_success(JOB_ID, EDGE_DEST, start),
+            Err(RestoreJobError::TargetNotFound)
+        );
+        let status = jobs.status(JOB_ID, start).unwrap();
+        assert!(matches!(
+            status.targets[0].state,
+            RestoreTargetStateView::Pending
+        ));
+    }
+
+    #[test]
     fn unfinished_targets_time_out() {
         let start = Instant::now();
         let snapshot = machine(vec![complete_source(CHROME_SOURCE, BrowserKind::Chrome)]);

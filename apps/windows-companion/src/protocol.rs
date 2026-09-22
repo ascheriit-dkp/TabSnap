@@ -1794,6 +1794,98 @@ mod tests {
     }
 
     #[test]
+    fn rejects_oversized_coordination_and_capture_bodies_before_reading_them() {
+        let (server, root) = test_server("coordination-limits");
+        let address = server.local_addr().unwrap();
+        let worker = thread::spawn(move || server.serve_n(2).unwrap());
+
+        let oversized_coordination = format!(
+            "POST /v1/browser/restore/failure HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            MAX_COORDINATION_BODY_BYTES + 1
+        );
+        let response = request(address, oversized_coordination.as_bytes());
+        assert!(response.starts_with(b"HTTP/1.1 413 Content Too Large\r\n"));
+
+        let oversized_capture = format!(
+            "POST /v1/browser/capture/result HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: application/octet-stream\r\nX-TabSnap-Instance: 0123456789abcdef0123456789abcdef\r\nX-TabSnap-Job: 11111111111111111111111111111111\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            MAX_CAPTURE_RESULT_BYTES + 1
+        );
+        let response = request(address, oversized_capture.as_bytes());
+        assert!(response.starts_with(b"HTTP/1.1 413 Content Too Large\r\n"));
+
+        worker.join().unwrap();
+        if root.exists() {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn restore_completion_is_bound_to_the_registered_extension_origin() {
+        let (server, root) = test_server("restore-origin-binding");
+        let restore_control = server.restore_control();
+        let address = server.local_addr().unwrap();
+
+        let source_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let destination_id = "0123456789abcdef0123456789abcdef";
+        let capture_job_id = "99999999999999999999999999999999";
+        let now = Instant::now();
+        let mut captures = CaptureJobStore::default();
+        captures
+            .create(
+                capture_job_id.to_owned(),
+                vec![crate::coordination::BrowserInstance {
+                    instance_id: source_id.to_owned(),
+                    browser: BrowserKind::Chrome,
+                    version: Some("140.0".to_owned()),
+                    capabilities: vec![BrowserCapability::Capture, BrowserCapability::Restore],
+                }],
+                now,
+            )
+            .unwrap();
+        captures
+            .submit_result(capture_job_id, source_id, vec![1, 2, 3], now)
+            .unwrap();
+        let export = captures.terminal_export(capture_job_id, now).unwrap();
+        let machine_library = MachineSnapshotLibrary::new(&root);
+        let machine = machine_library
+            .write_capture_job("restore-origin", &export)
+            .unwrap();
+
+        let worker = thread::spawn(move || server.serve_n(2).unwrap());
+
+        let registration_body =
+            format!("{BROWSER_WIRE_PREFIX}\n{destination_id}\nchrome\n140.0\ncapture,restore");
+        let registration = format!(
+            "POST /v1/browser/register HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{registration_body}",
+            registration_body.len()
+        );
+        assert!(
+            request(address, registration.as_bytes()).starts_with(b"HTTP/1.1 204 No Content\r\n")
+        );
+
+        let job = restore_control
+            .create_restore_job(&machine.file_name)
+            .unwrap();
+        let forged_body = format!("{RESTORE_WIRE_PREFIX}\n{destination_id}\n{}", job.job_id);
+        let forged = format!(
+            "POST /v1/browser/restore/result HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {FIREFOX_EXTENSION_ORIGIN}\r\nAuthorization: Bearer {TEST_TOKEN}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{forged_body}",
+            forged_body.len()
+        );
+        let response = request(address, forged.as_bytes());
+        assert!(response.starts_with(b"HTTP/1.1 403 Forbidden\r\n"));
+
+        let status = restore_control
+            .restore_job_status(&job.job_id)
+            .unwrap()
+            .unwrap();
+        assert!(!status.is_terminal());
+        assert_eq!(status.completed_count(), 0);
+
+        worker.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn status_advertises_restore_version() {
         let (server, root) = test_server("restore-version");
         let address = server.local_addr().unwrap();

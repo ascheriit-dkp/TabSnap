@@ -18,13 +18,13 @@ Capture windows and tabs, encrypt the snapshot, move it yourself, restore it som
 
 ## Status
 
-`v0.3.0-alpha.3` is the current Level 3 prerelease.
+`v0.4.0-alpha.1` is the Level 4 whole-machine prerelease.
 
 Chrome, Microsoft Edge and Firefox can capture and restore browser workspaces using the same `.tabsnap` format. Chrome ↔ Edge restore is supported through the shared Chromium implementation. Chromium ↔ Firefox restore is best-effort and reports known browser-specific tabs before restore.
 
-The optional portable Windows companion stores opaque encrypted snapshots locally or on removable storage. Extension-only mode does not require it.
+The optional portable Windows companion can coordinate explicitly paired browser pages for whole-machine capture and restore. It stores opaque encrypted `.tabsnap` payloads inside versioned `.tabsnap-machine` containers and never receives snapshot passwords or decrypted browser workspaces. Extension-only mode still works without it.
 
-Store submission preparation is in progress. See the [roadmap](./ROADMAP.md), [guides](./docs/guide/), [privacy policy](./docs/privacy.md) and [product spec](./docs/product-spec.md).
+`1.0.0` is not declared stable yet. The remaining manual multi-browser, portable-storage and real store/signing matrix is tracked in [Level 4 / 1.0 readiness](./docs/security/level4-readiness.md). See the [roadmap](./ROADMAP.md), [guides](./docs/guide/), [privacy policy](./docs/privacy.md) and [product spec](./docs/product-spec.md).
 
 ## Development
 
